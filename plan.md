@@ -1,6 +1,6 @@
 # CivilTrust App — Phân tích kiến trúc và kế hoạch triển khai
 
-> Tài liệu này được lập từ `desv2.md` và đối chiếu với mã nguồn hiện có trong `contracts/` v1.4.0 và `service/` v1.3.0. Phạm vi triển khai là app/web, NFC CCCD, chữ ký của hai bên, tài liệu và giao diện kiểm chứng. Không thay đổi mã nguồn `contracts/` hoặc `service/`.
+> Cập nhật ngày 25/10/2026. Kế hoạch thực hiện hiện hành nằm ở mục 8–13; các mục 14–15 ghi lại quyết định và tiến độ trước đó. Phạm vi công việc chỉ là `app/` (Flutter client, web verifier và `app/coordinator/`). `contracts/` v1.4.0 và `service/` v1.3.0 do thành viên khác phụ trách; app chỉ tích hợp qua giao thức đã thống nhất.
 
 ## 1. Kết luận kiến trúc
 
@@ -11,16 +11,7 @@
 3. Cuối ngày, service gom các hash thành Merkle tree và neo Merkle root lên Arbitrum.
 4. Người dùng hoặc bên thứ ba có thể tính lại hash, kiểm SCT và kiểm Merkle proof.
 
-Tuy nhiên, `desv2.md` hiện mô tả kiến trúc mục tiêu, không phải toàn bộ chức năng đang có. Những phần chưa tồn tại gồm:
-
-- App/mobile/web.
-- Cơ chế đọc và xác thực CCCD thật.
-- Chữ ký hợp đồng của Bên A và Bên B.
-- Phiên ký và đồng bộ trạng thái giữa hai thiết bị.
-- Upload/download ảnh, PDF và presigned URL.
-- WebAuthn registration/challenge/verification backend.
-- FROST2+ phía service.
-- Định dạng evidence package có thể kiểm chứng độc lập.
+`desv2.md` mô tả kiến trúc mục tiêu. Mã nguồn hiện tại đã có Flutter Web/iOS skeleton, hai chữ ký Ed25519 demo trên cùng digest, coordinator mã hóa phiên ký, PDF/ZIP và kiểm tra hash/chữ ký mock khi nhập ZIP. Những phần còn thiếu cho mục tiêu dài hạn là CCCD thật, chữ ký thiết bị gắn với danh tính, lưu trữ phiên bền vững, xác minh SCT/Merkle/RPC trong app, media/cloud và FROST2+ phía service. Mục 8 nêu rõ phần nào cần hoàn tất cho demo testnet trước hạn nộp.
 
 Kiến trúc hoàn chỉnh nên gồm bốn tầng:
 
@@ -39,7 +30,7 @@ Mobile app / Web app
                 └── Merkle proof verification
 ```
 
-Nếu không xây app coordination backend, hai bên phải trao đổi proposal/signed package trực tiếp qua QR, file hoặc native share.
+Coordinator hiện đã nằm trong `app/coordinator/` và chỉ giữ encrypted envelope trong bộ nhớ. Mô hình trao đổi file/QR trực tiếp vẫn là phương án khác, không thuộc đường triển khai demo hiện tại.
 
 ### 1.1. Các quyết định đã chốt
 
@@ -51,6 +42,10 @@ Nếu không xây app coordination backend, hai bên phải trao đổi proposal
 | NFC sau MVP | Nghiên cứu và tích hợp đọc CCCD thật trên iOS trước |
 | Mô hình ký | Hai bên ký từ xa trên hai thiết bị |
 | Contract/service | Chỉ tích hợp, không sửa trong phạm vi công việc app |
+| Demo gần nhất | Flutter Web trên hai browser/profile, kiểm chứng trên Arbitrum Sepolia |
+| Artifact được neo | `keccak256` của byte cuối cùng trong `agreement.pdf`; SCT/proof ở JSON đi kèm |
+| Thời hạn | 2–3 tuần từ 25/10/2026; mục tiêu luồng chính trước 08/11, dự phòng đến 15/11 |
+| Môi trường | Windows, chưa có Mac; không đặt iOS native/NFC thật vào điều kiện nghiệm thu demo |
 
 Hệ quả của các quyết định này:
 
@@ -206,39 +201,23 @@ Phương án event chain linh hoạt hơn nhưng tạo nhiều artifact và nhi�
 
 ### 3.5. Coordination layer cho hai bên ký từ xa
 
-Do hai bên dùng hai thiết bị ở xa, chỉ dùng Notary Service là không đủ. App cần một trong hai chế độ:
-
-#### Chế độ demo không backend thật
-
-- `MockSessionRepository` giữ session trong memory/local test fixture.
-- Hai browser profile kết nối tới một mock/dev coordinator.
-- Có thể dùng export/import proposal package nếu muốn demo hoàn toàn offline.
-
-#### Chế độ tích hợp từ xa
-
-Xây một app coordination backend riêng, không đặt vào hoặc sửa `service/`. Backend tối thiểu cần:
+Do hai bên dùng hai thiết bị ở xa, Notary Service không thay thế coordinator. `app/coordinator/` hiện có Node HTTP server lưu encrypted envelope trong memory, cấp owner/participant bearer capability, TTL và optimistic version. API hiện thực là:
 
 ```text
-POST /sessions
-GET  /sessions/:id
-POST /sessions/:id/party-a-signature
-POST /sessions/:id/party-b-signature
-POST /sessions/:id/payment-receipt
-POST /sessions/:id/finalize
+POST   /v1/sessions
+GET    /v1/sessions/:id
+PUT    /v1/sessions/:id           (expectedVersion + encryptedPayload)
+POST   /v1/sessions/:id/finalize (owner only)
+DELETE /v1/sessions/:id          (owner only)
 ```
 
-Khuyến nghị privacy:
+Client mã hóa toàn bộ session bằng AES-256-GCM trước khi upload; coordinator không phân tích từng chữ ký hay trạng thái thanh toán. Khóa giải mã và participant token nằm trong URL fragment, không nằm trong query parameter hay HTTP request. Cả A và B hiện có thể `PUT` encrypted envelope nếu sở hữu capability tương ứng; server chỉ kiểm version, chưa enforce state transition theo vai trò. Restart server làm mất mọi phiên. Đây là giới hạn demo và là đầu việc production sau mục tiêu testnet.
 
-- Client mã hóa draft, ảnh và chữ ký trước khi upload.
-- Server chỉ lưu ciphertext và trạng thái tối thiểu.
-- Khóa giải mã nằm trong URL fragment hoặc được trao đổi ngoài server; fragment không được gửi trong HTTP request.
-- Session ID và capability token phải ngẫu nhiên, không dùng số CCCD/SĐT.
-- Session có TTL và chức năng xóa.
-- Chỉ khi đã finalize, thiết bị chịu trách nhiệm hoàn tất mới gửi `agreementHash` sang Notary Service.
-
-Nếu chưa xây coordinator, “ký từ xa” chỉ có thể thực hiện bằng cách A và B gửi file/package qua ứng dụng nhắn tin hoặc native share.
+Sau khi A/B ký và A xác nhận nhận tiền, client A tạo PDF rồi gửi duy nhất `agreementHash` sang Notary Service; finalize coordinator không được xem là bằng chứng đã neo.
 
 ## 4. Quy trình dưới góc nhìn người dùng
+
+Mục 4 mô tả luồng sản phẩm tổng quát. Demo hiện chỉ có hai mẫu đặt cọc và vay tiền, CCCD mock, chữ ký Ed25519 demo và ZIP gồm PDF/JSON; trạng thái triển khai chính xác và việc cần làm tiếp nằm ở mục 8.
 
 ### 4.1. Bên A — Người tạo thỏa thuận
 
@@ -312,6 +291,8 @@ Không dùng một dấu tích xanh duy nhất cho mọi loại bằng chứng.
 
 ## 5. State machine đề xuất
 
+Sơ đồ dưới đây là trạng thái đích, không phải toàn bộ enum đã được implement. Demo phải tách trạng thái phiên ký khỏi các kết quả kiểm SCT/proof/RPC; `BATCHED` do service trả về chưa đồng nghĩa `VERIFIED`.
+
 ```text
 DRAFT
 → IDENTITY_A_VERIFIED
@@ -345,6 +326,8 @@ WRONG_CHAIN_OR_CONTRACT
 ```
 
 ## 6. Mô hình dữ liệu app
+
+Interface dưới đây là phác thảo kiến trúc ban đầu, chưa phải schema ZIP hiện hành. Mã đang ghi `civiltrust-evidence/1.0` với `documentHash`, `evidenceHash`, `session`, `signedCommitment`, `merkleProof`; parser từ chối schema khác. Không đổi schema theo phác thảo này trong kỳ demo nếu chưa có version/migration và test vector. Signing envelope v2 ở mục 8.5 là công việc sau demo.
 
 ```ts
 interface EvidenceManifestV1 {
@@ -382,6 +365,8 @@ Raw CCCD/APDU dump không được ghi vào manifest, URL, analytics hoặc debu
 
 ## 7. Module source code đề xuất cho Flutter
 
+Đây là sơ đồ tổ chức mục tiêu; không phải danh sách thư mục đã có. Mã hiện đặt artifact verifier trong `lib/features/artifacts/` và coordinator tại `app/coordinator/`. Ưu tiên bổ sung adapter/test vào cấu trúc hiện có, không tái cấu trúc hàng loạt trước demo.
+
 ```text
 app/
 ├── pubspec.yaml
@@ -418,144 +403,82 @@ app/
 
 Không đặt private key notary/relayer hoặc cluster secret trong Flutter app.
 
-## 8. Kế hoạch triển khai
+## 8. Kế hoạch hiện hành: demo testnet trong 2–3 tuần
 
-### Giai đoạn 0 — Chốt giao thức và môi trường Flutter, 2–3 ngày
+### 8.1. Phạm vi, đường găng và mốc bàn giao
 
-- Chọn artifact được hash.
-- Chọn thứ tự ký/thanh toán/notarize.
-- Xác nhận Flutter Web + Flutter iOS.
-- Kiểm tra máy phát triển có macOS/Xcode hay cần mượn Mac/CI.
-- Chọn session backend hay package exchange cho hai thiết bị từ xa.
-- Viết `evidence-schema-v1`.
-- Viết state machine và sequence diagram.
+Kế hoạch này bắt đầu ngày 25/10/2026. Một người làm phần `app/`; `contracts/` và `service/` do thành viên khác thực hiện. Ngày mục tiêu là **08/11/2026** cho luồng chính, **15/11/2026** là hạn dự phòng chạy thử và sửa lỗi. Đây là mốc lập kế hoạch, cần cập nhật nếu nhóm chốt ngày nộp chính xác khác.
 
-**Đầu ra:** không còn mơ hồ về byte nào được hash và mỗi chữ ký ký dữ liệu gì.
+**Luồng demo cần đạt:** A chọn mẫu và ký bằng mock → B mở invite, ký và báo chuyển tiền → A kiểm tra app ngân hàng, xác nhận thủ công → app tạo PDF và ZIP → gửi duy nhất hash PDF cho service → app tự kiểm SCT → sau khi batch neo, app tải và tự kiểm Merkle proof → app gọi RPC read-only tới contract Sepolia → verifier trình bày từng mức bằng chứng. Hai browser profile trên máy Windows là kịch bản bắt buộc; iPhone + browser chỉ là kịch bản bổ sung khi đã có HTTPS và endpoint truy cập được từ điện thoại.
 
-### Giai đoạn 1 — Flutter skeleton và vertical slice mock, 5–7 ngày
+**Quy ước bất biến:** `agreementHash = keccak256(bytes của agreement.pdf cuối cùng)`. SCT và proof chỉ được bổ sung vào `evidence.civiltrust.json`/ZIP; không render lại PDF sau submit. Chữ ký A/B v1 ký digest của draft, không trực tiếp ký toàn bộ byte PDF. `PaymentReceipt` v1 là xác nhận thủ công của A, chưa có chữ ký mật mã riêng. UI phải ghi đúng các giới hạn này.
 
-- Tạo Flutter project hỗ trợ web và iOS.
-- Thiết lập router, state management, environment và test.
-- Form hợp đồng mẫu.
-- Hai mock identity.
-- Freeze nội dung.
-- Hai chữ ký test.
-- Tạo PDF.
-- Tính hash.
-- Gọi `/submit`.
-- Lưu và kiểm SCT.
-- Export evidence package.
+**Đầu vào ngoài app đang thiếu:** deployment Sepolia (address/ABI/signer), service URL thử nghiệm và một SCT + Merkle proof + transaction thật. App vẫn phát triển bằng fixture local trong khi chờ, nhưng không thể nghiệm thu bước on-chain nếu chưa có các đầu vào này.
 
-**Đầu ra:** chạy xuyên suốt được mà chưa phụ thuộc NFC thật.
+### 8.2. Tuần 1 — 26/10 đến 01/11: kiểm SCT và chuẩn bị giao thức tích hợp
 
-### Giai đoạn 2 — Evidence Core và test vector, 4–5 ngày
+| Công việc trong `app/` | Cách thực hiện/đầu ra | Kiểm tra hoàn thành |
+|---|---|---|
+| Ổn định baseline | Chạy `flutter analyze`, `flutter test`, `npm test` của coordinator và web build trên môi trường có Flutter/Node; ghi lại lỗi môi trường riêng với lỗi code. Không đưa iOS build vào tuần này. | Bộ test hiện có chạy được; có script/hướng dẫn chạy demo hai browser. |
+| Model/API SCT | Tạo model có kiểm version, field, độ dài hash/signature; adapter `NotaryClient` nhận cả submit `201` và idempotent `200`, không tin dữ liệu thiếu/sai định dạng. Giữ tương thích SCT ECDSA v1.3.0 của service. | Test với response mới, response lặp, thiếu `signer`, sai hash và lỗi HTTP. |
+| EIP-712 verifier | Từ PDF hash và SCT, tính đúng typed-data digest; kiểm domain `CivilTrustRegistry`/`1`, chain ID, verifying contract, message hash, timestamp/nonce và ECDSA signer. Khi có deployment, đối chiếu signer được contract cho phép; trước đó chỉ ghi “hợp lệ với signer cấu hình/fixture”, không gọi là xác minh on-chain. | SCT hợp lệ pass; sửa một field, đổi chain/contract/signer hoặc sửa một byte PDF đều fail. |
+| Tách trạng thái kết quả | Hiển thị rõ `PDF/ZIP đã tạo`, `SCT đã nhận`, `SCT đã tự kiểm`, `đang chờ anchor`, `proof đã kiểm`, `on-chain đã kiểm`; trạng thái service là dữ liệu đầu vào, không thay thế phép kiểm client. | Không có nhãn “đã neo” khi mới nhận SCT hoặc chỉ nhận status `pending`. |
+| Liên hệ backend | Gửi danh sách bàn giao ở mục 10; yêu cầu fixture thật và deployment trước cuối tuần 1. | Nhận hoặc ghi rõ blocker cùng người phụ trách và ngày dự kiến. |
 
-- Canonical serialization.
-- `keccak256` file.
-- Evidence manifest schema validation.
-- Party signature verification.
-- SCT parsing/verification.
-- Merkle proof verification.
-- QR encode/decode.
-- Test vector dùng chung giữa mobile và web.
+Các file trọng tâm: `lib/features/notary/notary_client.dart`, `lib/core/crypto/`, `lib/features/artifacts/evidence_manifest.dart`, `lib/features/artifacts/verify_bundle_page.dart`, test tương ứng. Không để private key notary/relayer trong Flutter defines hay ZIP.
 
-### Giai đoạn 3 — Remote signing session, 1–2 tuần
+### 8.3. Tuần 2 — 02/11 đến 08/11: Merkle proof và RPC Sepolia
 
-- `SessionRepository` interface.
-- `MockSessionRepository` cho demo.
-- Tạo/join session bằng link hoặc QR.
-- A và B quan sát cùng revision đã freeze.
-- Optimistic locking/version check để ngăn ký hai revision khác nhau.
-- Đồng bộ chữ ký và trạng thái.
-- TTL, cancel và finalize ownership.
-- Nếu được phép: coordinator backend riêng, ưu tiên lưu ciphertext.
+| Công việc trong `app/` | Cách thực hiện/đầu ra | Kiểm tra hoàn thành |
+|---|---|---|
+| Status/proof client | Poll status có backoff/giới hạn; dùng `dateKey` service trả, gọi `GET /api/v1/agreements/:dateKey/:hash/proof`; phân biệt chưa có batch, record chưa có, lỗi mạng và response hỏng. | Không poll vô hạn; `404` không bị diễn giải là hash chưa từng được neo. |
+| Merkle local | Dùng leaf `keccak256(bytes.concat(keccak256(abi.encode(agreementHash))))` và sorted-pair hashing giống service/contract. Đối chiếu root, hash, dateKey và proof trong response; lưu proof cùng metadata cần thiết trong sidecar. | Fixture 1/2/3 lá từ backend pass; proof, leaf, root hoặc dateKey sai fail. |
+| RPC read-only | Pin chain ID và contract address theo môi trường; gọi `verifyReceipt` và `verifyAgreement` qua ABI đúng deployment; so sánh kết quả với kiểm tra local và hiển thị explorer link. Không broadcast anchor từ app. | Sai chain/address/ABI hoặc RPC unavailable hiện “chưa kiểm được”; chỉ trả “on-chain đã kiểm” khi `eth_call` cho kết quả hợp lệ. |
+| ZIP sau anchor | Thêm SCT/proof/tx metadata vào `evidence.civiltrust.json`, giữ nguyên `agreement.pdf` và `documentHash`; cho tải ZIP cập nhật. Import ZIP trên browser khác phải kiểm lại từ đầu. | Hash PDF trước/sau khi thêm proof bằng nhau; import ZIP phát hiện PDF/proof bị sửa. |
+| Chạy xuyên suốt | Hai browser A/B, coordinator và service testnet; chuẩn bị một hồ sơ đã neo sẵn vì cron 23:59 UTC tương ứng 06:59 hôm sau giờ Việt Nam. | Có một hash PDF, SCT, proof, tx hash và contract address Sepolia đối chiếu được độc lập. |
 
-### Giai đoạn 4 — Chữ ký hai bên, khoảng 1 tuần
+Nếu deployment/proof thật chưa có, hoàn thành adapter và test bằng fixture, giữ nhãn RPC là “chưa tích hợp testnet”. Thành viên service chịu trách nhiệm tạo batch hoặc cung cấp hồ sơ đã neo; app không tự sửa cron/relayer.
 
-- MVP: `MockPartySigner` có chữ ký kiểm được để hoàn thiện luồng.
-- iOS thật: khóa P-256 trong Keychain/Secure Enclave nếu capability phù hợp.
-- Yêu cầu LocalAuthentication/biometric hoặc device passcode trước khi ký.
-- Ký digest của nội dung đã freeze.
-- Ghi public key, algorithm và signature vào evidence.
-- Flutter/Web verifier kiểm chữ ký.
+### 8.4. Tuần dự phòng — 09/11 đến 15/11: ổn định demo
 
-Không phụ thuộc WebAuthn trong MVP. Nếu sau này dùng passkey/WebAuthn thì cần RP backend, challenge và credential registry riêng.
+1. Chạy lại hai mẫu đặt cọc/vay tiền trên hai browser, gồm refresh, invite hết hạn, version conflict, service mất mạng và submit lặp; khôi phục hoặc hướng dẫn lại thao tác thay vì báo thành công giả.
+2. Kiểm export/import ZIP ở browser độc lập; đối chiếu SCT/proof/RPC. Kiểm tra chiều tiền: B chuyển cho A; A chỉ xác nhận sau khi tự kiểm app ngân hàng.
+3. Kiểm UI tại khoảng 375, 768 và 1280 px, thao tác bằng bàn phím/touch, lỗi mạng và thông báo mock rõ ràng. Chỉ dùng iPhone Safari như kiểm tra web bổ sung nếu endpoint đã được triển khai HTTPS; không tuyên bố đã build iOS native.
+4. Chuẩn bị hai bộ hồ sơ demo: trước anchor (SCT hợp lệ, proof chưa có) và sau anchor (proof/RPC hợp lệ), cùng các bản bị sửa để cho thấy verifier từ chối. Ghi địa chỉ contract, transaction và ngày batch trong kịch bản trình diễn.
+5. Chạy lại static analysis, unit/widget tests, coordinator tests và Flutter Web release build. Chỉ mở rộng test nếu có lỗi tích hợp cụ thể.
 
-### Giai đoạn 5 — PDF, evidence package và VietQR, 4–6 ngày
+### 8.5. Sau demo — chất lượng bằng chứng và sản phẩm lâu dài
 
-- Render PDF cuối sau khi đủ chữ ký/sự kiện.
-- Đóng băng file và tính hash.
-- Export/import ZIP hoặc file evidence.
-- Sinh VietQR.
-- Tạo xác nhận nhận tiền riêng có chữ ký A.
+**Ưu tiên đầu tiên: evidence/signing protocol v2.** V1 hiện chỉ ký `frozenDigest` của draft; object danh tính, vai trò, thời điểm ký và `PaymentReceipt` chưa được chữ ký ràng buộc đầy đủ. V2 cần signing envelope có version và domain separation, tối thiểu gồm agreement digest, `identityCommitment`, role, session/revision ID; xác nhận thanh toán là sự kiện riêng tham chiếu agreement và có chữ ký của A. Thêm migration/reader cho ZIP v1, test giả mạo từng field và không nâng nhãn bảo đảm của hồ sơ v1 lên v2. Vẫn giữ PDF hash là artifact neo trừ khi nhóm quyết định migration giao thức riêng.
 
-### Giai đoạn 6 — Tích hợp notary và blockchain, 3–5 ngày
+Sau v2: lưu draft/capability an toàn để tiếp tục sau reload; persistent coordinator có TTL, rate limit, role-scoped updates và idempotency; phân phối ZIP cuối cho B; media/attachment manifest; cloud lưu nguyên ZIP. Chữ ký Keychain/Secure Enclave và Core NFC CCCD trên iPhone chỉ triển khai khi có Mac/Xcode, iPhone vật lý, protocol/SDK và trust anchors. FROST2+ ở service là nâng cấp tương thích chữ ký notary, không làm app đổi artifact hoặc luồng tạo hợp đồng.
 
-- Client cho submit/status/proof/recover.
-- Xử lý submit `200` và `201`.
-- Ghim chain ID/contract address theo environment.
-- Kiểm SCT ECDSA v1.3.0.
-- Kiểm proof cục bộ.
-- Gọi `verifyReceipt`/`verifyAgreement` bằng RPC.
-- Hiển thị transaction explorer link.
+## 9. Thứ tự ưu tiên và quy tắc cắt phạm vi
 
-### Giai đoạn 7 — iOS NFC adapter sau MVP, 1–3 tuần cộng thời gian nghiên cứu SDK
+1. Demo trước hạn: SCT EIP-712 tự kiểm → proof Merkle tự kiểm → RPC Sepolia đọc và đối chiếu → ZIP sau anchor → E2E hai browser.
+2. Các sửa tối thiểu để demo trung thực: nhãn mock, phân biệt các mức bằng chứng, xử lý lỗi/submit lặp và không tuyên bố metadata v1 đã được A/B ký đầy đủ.
+3. Nếu thiếu thời gian, cắt UI polish, Google Drive, ảnh đính kèm, iOS native/NFC, Secure Enclave và coordinator production. Không cắt phép kiểm SCT/proof/RPC mà vẫn quảng bá là demo “on-chain verified”.
+4. Sau demo, ưu tiên evidence/signing v2 trước khi dùng dữ liệu CCCD thật hoặc mở rộng hồ sơ ra production.
 
-- Kiểm tra thiết bị/quyền NFC.
-- Scan lifecycle, timeout, retry và cancel.
-- Flutter plugin hoặc platform channel sang Swift/Core NFC.
-- Giao tiếp ISO 7816/APDU theo tài liệu/SDK được phép sử dụng.
-- Tích hợp protocol CCCD khi có tài liệu và trust anchors.
-- Xác minh certificate/chip nếu SDK cho phép.
-- Xóa raw buffer sau khi trích xuất dữ liệu cần thiết.
+## 10. Bàn giao cần nhận từ thành viên contracts/service
 
-### Giai đoạn 8 — Hardening và demo, 4–5 ngày
+| Đầu vào | Người phụ trách | App dùng vào việc gì | Hạn mong muốn |
+|---|---|---|---|
+| Chain ID 421614, address Sepolia, ABI đúng của deployment v1.4.0, contract version, explorer URL và tx deploy | Contracts | Pin EIP-712 domain, build RPC `eth_call`, chống nhầm chain/contract | Trước 01/11 |
+| `batchSigner`, `receiptSigner` của deployment và chính sách kiểm SCT cũ khi signer rotate | Contracts | Quyết định chữ ký SCT nào được tin ở thời điểm kiểm chứng | Trước 01/11 |
+| Dev/test base URL truy cập từ Flutter Web, CORS, response mẫu `submit` 201/200, `status`, `proof`, `recover` | Service | Tạo typed adapter và xử lý status/lỗi đúng API | Trước 01/11 |
+| SCT ECDSA hợp lệ/sai, proof 1/2/3 lá, root, `dateKey`, tx hash và một batch đã neo trên Sepolia | Cả hai | Fixture Dart/TypeScript/Solidity và kịch bản demo không phải chờ cron | Trước 03/11 |
+| Quy tắc quiet window 23:55 UTC, khi nào proof sẵn sàng, ý nghĩa `404` và recovery record pending ngày cũ | Service | Poll và hiển thị trạng thái đúng; xử lý tự phục hồi về sau | Trước 03/11 |
 
-- Không log PII.
-- Secure storage.
-- Test sửa một byte PDF.
-- Test chữ ký/SCT/proof giả.
-- Test sai chain và contract.
-- Test thiết bị không NFC.
-- Test offline và service lỗi.
-- Test export/import trên thiết bị khác.
-- Chuẩn bị kịch bản demo trước và sau daily anchor.
-
-Ước lượng một người sau khi đổi sang Flutter + remote session:
-
-- MVP Flutter Web/iOS mock, hai bên ký từ xa qua mock/dev coordinator: 4–5 tuần.
-- MVP có coordination backend ổn định: 5–7 tuần.
-- iOS NFC thật và verifier hoàn chỉnh: cộng thêm 1–3 tuần sau khi có protocol/SDK, Mac và quyền/capability cần thiết.
-
-## 9. Thứ tự ưu tiên
-
-1. Chốt artifact và signing protocol.
-2. Dựng Flutter Web/iOS project và shared Dart core.
-3. Làm vertical slice bằng mock identity.
-4. Làm remote session giữa hai browser/device.
-5. Tích hợp ECDSA SCT hiện tại.
-6. Làm web verifier.
-7. Thêm VietQR/payment receipt.
-8. Thêm iOS Core NFC sau khi có SDK/protocol và môi trường macOS.
-9. Sau cùng mới làm media cloud và compatibility với FROST2+.
-
-Không nên bắt đầu từ NFC thật hoặc giao diện đẹp trước khi chốt hash và signing protocol.
-
-## 10. Phụ thuộc cần nhận từ thành viên contract/service
-
-- Service base URL cho môi trường dev/test.
-- Chain ID và địa chỉ contract Arbitrum Sepolia.
-- ABI chính xác của deployment.
-- `batchSigner` và `receiptSigner` test.
-- Một SCT ECDSA hợp lệ làm test vector.
-- Một daily batch/proof hợp lệ làm test vector.
-- Quyết định response SCT idempotent phải có field `signer`.
-- Chính sách kiểm receipt lịch sử sau khi rotate signer.
-- Cách xử lý recovery cho record `pending` thuộc ngày cũ.
-- Xác nhận FROST2+ không chặn MVP.
+Hai điểm giao thức cần thành viên service xác nhận/sửa trong repo của họ: `submit` lần đầu có `sct.signer` nhưng nhánh idempotent hiện thiếu field này; recovery cho record `pending` ngày cũ chưa chuyển nó sang `targetDateKey`. App cần chịu được lỗi/khác biệt tạm thời và ghi đúng mức kiểm chứng, nhưng không tự thay đổi mã `service/`. Contract hỗ trợ ECDSA và Schnorr; service hiện ký ECDSA, đủ cho demo testnet. FROST2+ không nằm trên đường găng.
 
 ## 11. Rủi ro cần ghi đúng trong báo cáo
 
+- Chưa có Mac nên Flutter iOS native và Core NFC không được kiểm chứng trong kỳ demo; Flutter Web trên iPhone chỉ là kiểm tra trình duyệt.
+- Chữ ký A/B v1 là Ed25519 demo với khóa tạm thời, ký draft digest; danh tính đặt cạnh chữ ký và `PaymentReceipt` chưa được chữ ký đó ràng buộc mật mã. `evidenceHash` tự tính lại từ JSON không thay thế chữ ký trên toàn bộ metadata. Verifier phải ghi rõ phạm vi kiểm tra và không kết luận danh tính/chuyển tiền đã được chứng minh.
+- Có SCT không đồng nghĩa đã được neo; `batched` do service báo cũng chưa đủ nếu app chưa kiểm proof và root trên đúng contract.
+- Thiếu deployment Sepolia, fixture thật hoặc endpoint test là blocker cho demo on-chain, không phải lỗi riêng của Flutter app.
+- Coordinator đang lưu in-memory; restart xóa phiên. Owner capability hiện chưa được lưu để khôi phục sau reload và link mời là bearer capability, cần chia sẻ qua kênh tin cậy.
 - PWA thuần không bảo đảm đọc được CCCD chip.
 - NFC không thay thế hành động ký.
 - WebAuthn user verification không tự cung cấp danh tính ngoài đời.
@@ -567,36 +490,33 @@ Không nên bắt đầu từ NFC thật hoặc giao diện đẹp trước khi 
 - Zero-PII on-chain không đồng nghĩa toàn hệ thống tự động tuân thủ pháp luật dữ liệu cá nhân.
 - Không gọi sản phẩm là công chứng hoặc dịch vụ dấu thời gian được công nhận nếu chưa có đánh giá pháp lý phù hợp.
 
-## 12. Tiêu chí hoàn thành MVP
+## 12. Tiêu chí nghiệm thu demo testnet
 
-- Hai bên nhìn thấy và ký đúng cùng một nội dung đã freeze.
-- Một byte thay đổi làm verification thất bại.
-- Mock CCCD và adapter NFC dùng chung interface.
-- Không gửi PII tới Notary Service hoặc RPC.
-- App tự kiểm SCT thay vì chỉ tin API response.
-- App theo dõi được `pending` → `batched`.
-- App tự kiểm Merkle proof.
-- Export/import evidence package tái lập đúng hash và kết quả chữ ký.
-- Web verifier hiển thị riêng từng loại bằng chứng.
-- Kịch bản demo không phụ thuộc FROST2+ hoặc mainnet.
+1. Hai browser/profile hoàn tất cả mẫu đặt cọc và vay tiền; B chuyển cho A, A xác nhận thủ công sau khi kiểm app ngân hàng. Cả A/B ký cùng frozen digest; sửa draft làm chữ ký không hợp lệ.
+2. PDF cuối được tạo một lần sau bước thanh toán; `keccak256` của byte PDF không đổi khi bổ sung SCT/proof vào JSON/ZIP. Import ZIP trên browser độc lập tính lại hash và kiểm hai chữ ký Ed25519 demo.
+3. Request notary chỉ chứa `agreementHash` 32 byte, không có CCCD, họ tên, nội dung, tài khoản ngân hàng, capability hay khóa giải mã. Service lỗi không làm mất khả năng xuất ZIP local.
+4. App tự kiểm EIP-712 SCT, gồm PDF hash, message, domain, chain/contract và signer; SCT sai bị từ chối. Xử lý cả submit mới và submit lặp.
+5. App lấy `dateKey`/proof từ API, tự kiểm Merkle leaf/path/root và dùng RPC read-only xác nhận receipt/inclusion ở đúng CivilTrustRegistry Sepolia. Service status `pending`/`batched` chỉ là thông tin tham khảo; UI không tự suy diễn on-chain validity.
+6. Màn verifier hiển thị riêng: kiểm cục bộ PDF/chữ ký mock, SCT, proof và RPC; thiếu dữ liệu/lỗi mạng hiện “chưa kiểm được”, sai dữ liệu hiện “không hợp lệ”. Có explorer link cho tx thật.
+7. Có một hồ sơ mẫu trước anchor và một hồ sơ mẫu sau anchor để demo không phụ thuộc đúng thời điểm cron. Có test âm tính cho PDF/SCT/proof/chain bị sửa.
+8. `flutter analyze`, `flutter test`, coordinator `npm test` và Flutter Web release build chạy đạt trên môi trường có công cụ; nếu công cụ chưa có, ghi rõ giới hạn và không tuyên bố pass. Không yêu cầu iOS native, NFC thật, FROST2+ hoặc mainnet để nghiệm thu demo.
 
-## 13. Các câu hỏi cần chốt trước khi bắt đầu code
+**Chưa phải tiêu chí của demo:** ràng buộc mật mã identity/payment bằng signing envelope v2, lưu trữ coordinator production, khôi phục capability sau reload, media/cloud và iOS NFC. Các khoản này có thứ tự trong mục 8.5. Mọi màn hình/tài liệu demo phải ghi đúng giới hạn của v1.
 
-Các câu hỏi còn lại sau khi đã chốt Flutter, mock-first và hai thiết bị từ xa:
+## 13. Quyết định đã chốt và thông tin còn cần xác nhận
 
-1. Máy phát triển của bạn là Windows hay macOS? Bạn có quyền sử dụng một máy Mac để build iOS không?
-2. Luồng ký từ xa có được phép xây một coordination backend riêng trong `app/` không?
-3. Nếu có backend, MVP được phép lưu draft/ảnh hay phải mã hóa hoàn toàn ở client trước khi upload?
-4. Artifact được neo là hash của PDF hay hash của canonical evidence manifest?
-5. Thanh toán và xác nhận nhận tiền phải nằm trong cùng artifact hay là event riêng?
-6. MVP dùng mock device signature hay bắt buộc passkey/WebAuthn/chữ ký sinh trắc học thật?
-7. MVP có bắt buộc Viettel IDC/Google Drive không, hay chỉ cần export/import file?
-8. Nhóm đã có service URL và contract Sepolia deployment chưa?
-9. Deadline nộp bài và số người làm phần app là bao nhiêu?
+Đã chốt với người phụ trách app ngày 25/10/2026: ưu tiên demo/testnet trước, giữ hash của `agreement.pdf` với SCT/proof ở JSON đi kèm, hiện không có Mac và hạn demo/nộp bài khoảng 2–3 tuần. Flutter Web hai browser là đường nghiệm thu chính. Repo `app/` đã có commit local `1dc88a7`; push GitHub hiện bị từ chối quyền Write và sẽ thực hiện khi quyền repository được cấp. Việc push không chặn phát triển local, nhưng nhóm nên giải quyết sớm để chia sẻ code và tránh mất bản sao.
 
-## 14. Cập nhật quyết định và trạng thái MVP (10/10/2026)
+Thông tin còn cần chốt để khóa lịch thực tế:
 
-Các câu 1–7 ở trên đã được chốt:
+1. Ngày/giờ nộp chính xác và số người có thể hỗ trợ riêng phần app; hiện kế hoạch giả định một người và hạn dự phòng 15/11.
+2. Khi nào có deployment Sepolia và service test URL; ai cung cấp bộ fixture SCT/proof/transaction thật.
+3. Demo chỉ trên hai browser máy tính hay bắt buộc một bên dùng iPhone Safari? Trường hợp iPhone cần HTTPS và coordinator/service truy cập được qua mạng, `localhost` trên máy Windows không đủ.
+4. Nhóm có đồng ý dùng hồ sơ đã neo sẵn cho buổi demo không, do lịch anchor hàng ngày không trùng thời điểm thuyết trình.
+
+## 14. Lịch sử quyết định và trạng thái MVP (10/10/2026)
+
+Đây là ảnh chụp tiến độ ngày 10/10; kế hoạch và ưu tiên mới nhất xem mục 8–13. Các quyết định đã chốt ở thời điểm đó:
 
 - Máy phát triển là Windows, hiện không có máy Mac.
 - Cho phép coordinator backend riêng trong `app/coordinator/`.
@@ -627,7 +547,7 @@ Chưa thuộc vertical slice hiện tại và là backlog ưu tiên:
 6. Keychain/Secure Enclave + LocalAuthentication và CCCD NFC thật trên iPhone.
 7. Media/ảnh đính kèm với hash riêng, giới hạn dung lượng và mã hóa client-side.
 
-Hai thông tin còn cần từ nhóm contract/service để hoàn thiện tích hợp blockchain là URL dev, địa chỉ deployment Arbitrum Sepolia/ABI và test vector SCT + Merkle proof. Thông tin quản lý dự án còn thiếu là deadline và số người thực hiện phần app.
+Thông tin còn cần từ nhóm contract/service được cập nhật chi tiết ở mục 10. Người phụ trách app đã chốt hạn demo khoảng 2–3 tuần từ 25/10 nhưng chưa cung cấp giờ nộp chính xác hoặc số người hỗ trợ app.
 
 ## 15. Cập nhật hai mẫu hợp đồng và luồng giao diện (10/10/2026)
 
@@ -662,4 +582,4 @@ Hai thông tin còn cần từ nhóm contract/service để hoàn thiện tích 
 - NFC chỉ cung cấp/kiểm chứng dữ liệu chip; thao tác đồng ý và chữ ký điện tử vẫn là bước riêng.
 - VietQR là payload tạo phía client; cần thử với nhiều app ngân hàng trước production. MVP không tự đọc biến động số dư nên A bắt buộc kiểm tra tiền thật.
 - Nội dung mẫu hiện phục vụ demo kỹ thuật, chưa thay thế việc luật sư rà soát điều khoản, đặc biệt lãi suất, phạt cọc, thẩm quyền tranh chấp và bảo vệ dữ liệu cá nhân.
-- Google Drive, Secure Enclave/passkey, CCCD NFC thật và xác minh SCT/Merkle on-chain đầy đủ vẫn thuộc giai đoạn sau.
+- Tại ngày 10/10, Google Drive, Secure Enclave/passkey, CCCD NFC thật và xác minh SCT/Merkle on-chain đầy đủ đều thuộc backlog. Theo quyết định ngày 25/10, xác minh SCT/Merkle/on-chain được kéo lên đường găng demo ở mục 8; các hạng mục còn lại vẫn sau demo.
