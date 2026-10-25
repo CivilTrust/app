@@ -35,6 +35,11 @@ flutter run -d chrome `
 ```
 
 On the prepared Windows development machine, you can also run `./run-web.ps1`.
+The script uses `http://localhost:8787` for notary unless `CIVILTRUST_NOTARY_URL`
+is set. The current Bun service defaults to port `3000`, so a local run normally
+needs `$env:CIVILTRUST_NOTARY_URL='http://localhost:3000'` before launching
+`./run-web.ps1` or `./run-demo.ps1`. The Flutter app must use the exact port on
+which the service is listening.
 After changing User PATH, close and reopen PowerShell before calling `flutter`
 directly; an already-open terminal keeps its old PATH value.
 
@@ -47,6 +52,8 @@ For a one-command local demo that starts the coordinator when needed, use:
 Open two browser profiles/windows. Party A uses **Tạo hợp đồng**, copies the invite, and Party B opens it directly (the fragment switches to **Tham gia ký**) or pastes it manually. B signs and reports the transfer; A refreshes, checks the bank transaction, confirms receipt, and downloads the ZIP.
 
 If the existing notary service is unavailable, ZIP export still succeeds without SCT. Start and configure `service/` separately when demonstrating SCT and later anchoring.
+For a phone browser, `localhost` means the phone itself; use reachable HTTPS
+coordinator/notary URLs. Native iOS builds still require a Mac.
 
 ## Configuration
 

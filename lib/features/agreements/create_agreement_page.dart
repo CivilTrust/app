@@ -249,7 +249,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     try {
       final sct = await NotaryClient(widget.config.notaryBaseUrl)
           .submit(result.evidence.documentHash);
-      result = ArtifactService(hash).attachNotary(result, sct);
+      result = ArtifactService(hash).attachNotary(result, sct.toJson());
       notaryReceived = true;
       message = 'Đã tạo PDF và nhận phản hồi SCT. Chữ ký SCT chưa được app tự kiểm chứng.';
     } catch (error) {

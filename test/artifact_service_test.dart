@@ -32,6 +32,19 @@ void main() {
     expect(imported.session.partyB?.signedDigest, session.frozenDigest);
   });
 
+  test('adding SCT changes sidecar only and preserves PDF hash', () async {
+    final bundle = await artifactService.build(await _signedPaidSession());
+    final withSct = artifactService.attachNotary(bundle, {
+      'version': '1.3.0',
+      'message': {'agreementHash': bundle.evidence.documentHash},
+    });
+    expect(withSct.pdf, bundle.pdf);
+    expect(withSct.evidence.documentHash, bundle.evidence.documentHash);
+    final imported = artifactService.importZip(withSct.zip);
+    expect(imported.documentHash, bundle.evidence.documentHash);
+    expect(imported.signedCommitment?['version'], '1.3.0');
+  });
+
   test('tampered PDF is rejected during ZIP import', () async {
     final bundle = await artifactService.build(await _signedPaidSession());
     final source = ZipDecoder().decodeBytes(bundle.zip);

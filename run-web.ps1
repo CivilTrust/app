@@ -13,12 +13,18 @@ if (-not (Test-Path -LiteralPath $flutterExecutable)) {
 
 Push-Location $PSScriptRoot
 try {
+    $notaryUrl = if ($env:CIVILTRUST_NOTARY_URL) {
+        $env:CIVILTRUST_NOTARY_URL
+    } else {
+        'http://localhost:8787'
+    }
+
     & $flutterExecutable pub get
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
     & $flutterExecutable run -d chrome `
         --dart-define=COORDINATOR_URL=http://localhost:8788 `
-        --dart-define=NOTARY_URL=http://localhost:8787
+        "--dart-define=NOTARY_URL=$notaryUrl"
     exit $LASTEXITCODE
 }
 finally {
