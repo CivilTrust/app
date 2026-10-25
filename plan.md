@@ -417,15 +417,53 @@ Kế hoạch này bắt đầu ngày 25/10/2026. Một người làm phần `app
 
 ### 8.2. Tuần 1 — 26/10 đến 01/11: kiểm SCT và chuẩn bị giao thức tích hợp
 
-| Công việc trong `app/` | Cách thực hiện/đầu ra | Kiểm tra hoàn thành |
-|---|---|---|
-| Ổn định baseline | Chạy `flutter analyze`, `flutter test`, `npm test` của coordinator và web build trên môi trường có Flutter/Node; ghi lại lỗi môi trường riêng với lỗi code. Không đưa iOS build vào tuần này. | Bộ test hiện có chạy được; có script/hướng dẫn chạy demo hai browser. |
-| Model/API SCT | Tạo model có kiểm version, field, độ dài hash/signature; adapter `NotaryClient` nhận cả submit `201` và idempotent `200`, không tin dữ liệu thiếu/sai định dạng. Giữ tương thích SCT ECDSA v1.3.0 của service. | Test với response mới, response lặp, thiếu `signer`, sai hash và lỗi HTTP. |
-| EIP-712 verifier | Từ PDF hash và SCT, tính đúng typed-data digest; kiểm domain `CivilTrustRegistry`/`1`, chain ID, verifying contract, message hash, timestamp/nonce và ECDSA signer. Khi có deployment, đối chiếu signer được contract cho phép; trước đó chỉ ghi “hợp lệ với signer cấu hình/fixture”, không gọi là xác minh on-chain. | SCT hợp lệ pass; sửa một field, đổi chain/contract/signer hoặc sửa một byte PDF đều fail. |
-| Tách trạng thái kết quả | Hiển thị rõ `PDF/ZIP đã tạo`, `SCT đã nhận`, `SCT đã tự kiểm`, `đang chờ anchor`, `proof đã kiểm`, `on-chain đã kiểm`; trạng thái service là dữ liệu đầu vào, không thay thế phép kiểm client. | Không có nhãn “đã neo” khi mới nhận SCT hoặc chỉ nhận status `pending`. |
-| Liên hệ backend | Gửi danh sách bàn giao ở mục 10; yêu cầu fixture thật và deployment trước cuối tuần 1. | Nhận hoặc ghi rõ blocker cùng người phụ trách và ngày dự kiến. |
+**Mục tiêu cuối tuần:** từ `agreement.pdf` và SCT v1.3.0, Flutter Web tự trả lời được ba câu hỏi tách biệt: (1) SCT có đúng cấu trúc và ràng buộc với hash PDF không; (2) chữ ký ECDSA có phục hồi ra một signer được tin cậy không; (3) contract đã xác nhận trên chain chưa. Câu (3) thuộc tuần 2; trong tuần 1 chỉ được hiện “chưa kiểm on-chain”. SCT xuất phát từ service là dữ liệu chưa được tin cậy cho tới khi app tự kiểm.
 
-Các file trọng tâm: `lib/features/notary/notary_client.dart`, `lib/core/crypto/`, `lib/features/artifacts/evidence_manifest.dart`, `lib/features/artifacts/verify_bundle_page.dart`, test tương ứng. Không để private key notary/relayer trong Flutter defines hay ZIP.
+#### Ngày 1 — Thứ hai 26/10: khóa baseline và gửi yêu cầu tích hợp
+
+1. Kiểm tra `app/` sạch, ghi commit gốc; chạy `flutter analyze`, `flutter test`, `flutter build web` tại `app/` và `npm test` tại `app/coordinator/`. Ghi chính xác lệnh, phiên bản công cụ, kết quả và lỗi môi trường. `test/live_coordinator_test.dart` mặc định bị skip nếu không đặt `LIVE_COORDINATOR_URL`; muốn kiểm HTTP thật phải chủ động chạy coordinator và đặt URL.
+2. Chạy một lần hai browser trên máy Windows: A tạo hợp đồng, B ký/báo chuyển, A xác nhận và tải ZIP. Kiểm `agreement.pdf` và `evidence.civiltrust.json` được tạo, hash PDF khớp manifest. Đây là baseline để phát hiện regression khi tích hợp SCT.
+3. Kiểm cấu hình URL: app mặc định gọi notary ở `localhost:8787`, trong khi service Bun mặc định dùng port `3000`; khi chạy local phải truyền `NOTARY_URL` đúng port hoặc cấu hình proxy. `localhost` trên iPhone trỏ về chính iPhone, không trỏ về máy Windows.
+4. Gửi cho thành viên service/contracts bảng ở mục 10, đặc biệt yêu cầu SCT đầy đủ từ cả response `201` và `200`, domain/signer Sepolia, fixture hợp lệ/sai và ngày dự kiến deploy. Ghi một đầu mối liên hệ, thời hạn phản hồi và blocker cụ thể. Không chờ họ mới bắt đầu phần parser/verifier bằng fixture local.
+
+**Đầu ra ngày 1:** biên bản baseline ngắn, một ZIP mẫu v1, danh sách cấu hình đang dùng và yêu cầu bàn giao đã gửi. Không đưa PII thật hoặc private key vào fixture/commit.
+
+#### Ngày 2 — Thứ ba 27/10: model SCT và hợp đồng dữ liệu của client
+
+1. Tạo kiểu dữ liệu riêng cho `SignedCommitmentToken` gồm `version`, `domain`, `message`, `signer` (có thể vắng ở response idempotent hiện tại) và `signature`. Đọc đúng schema service v1.3.0: `Receipt(bytes32 agreementHash,uint256 dateKey,uint64 timestamp,bytes32 nonce)` và domain `CivilTrustRegistry`/`1`/chain ID/verifying contract.
+2. Validate độ dài/hex của hash, nonce, address và signature ECDSA 65 byte; `dateKey` và `timestamp` là số nguyên hợp lệ. Không ép `dateKey` bằng ngày hiện tại vì service có quiet window 23:55 UTC và lịch sử batch. SCT version/algorithm chưa hỗ trợ phải trả kết quả “không hỗ trợ”, không thử giải mã tùy tiện.
+3. Đổi `NotaryClient.submit()` từ `Map<String,dynamic>` tùy ý sang response typed; kiểm `success`/`data`/`sct`, xử lý `201` và `200`, timeout, body không phải JSON và lỗi HTTP có thông điệp riêng. Chỉ gửi `agreementHash`; không gửi PDF/CCCD/terms. Đối chiếu `sct.message.agreementHash` với `documentHash` của ZIP.
+4. Giữ `sct.signer` như metadata để đối chiếu, không dùng nó làm nguồn tin cậy duy nhất. Vì service đang thiếu field này ở nhánh `200`, verifier phải dựa vào chữ ký đã phục hồi và tập signer tin cậy; đồng thời yêu cầu thành viên service thống nhất response.
+
+**Đầu ra ngày 2:** model/parser và test API cho response `201`, `200`, thiếu field, sai kiểu, hash khác PDF, lỗi mạng/HTTP; không làm mất ZIP local khi service lỗi.
+
+#### Ngày 3–4 — Thứ tư/thứ năm 28–29/10: EIP-712 và ECDSA recovery
+
+1. Tách một verifier thuần Dart, không phụ thuộc widget: dựng domain separator và Receipt struct hash theo ABI/EIP-712, rồi tính digest `keccak256(0x1901 || domainSeparator || structHash)`. `agreementHash` là hash của byte PDF, không phải `frozenDigest` của draft hoặc hash JSON.
+2. Dùng thư viện Dart tương thích Flutter Web có phép phục hồi public key/address secp256k1 từ chữ ký ECDSA; chọn thư viện sau khi kiểm khả năng chạy Web và test vector của Viem/service. Tránh tự viết thuật toán elliptic-curve chỉ để kịp demo. Nếu ngày 28/10 chưa có thư viện phù hợp, báo rủi ro ngay và giữ mốc spike tối đa một ngày trước khi điều chỉnh lịch.
+3. Kiểm signer phục hồi được thuộc `batchSigner` hoặc `receiptSigner` đáng tin của đúng deployment Sepolia. Không chấp nhận chữ ký chỉ vì nó khớp `sct.signer` do SCT tự khai. Khi chưa có deployment, dùng signer fixture được nhóm cung cấp hoặc test key cố định và ghi kết quả “đã kiểm chữ ký với fixture/cấu hình, chưa xác nhận contract”. Không để private key trong app.
+4. Test bằng SCT do service/Viem ký, không chỉ bằng SCT tự tạo trong Dart. Bộ test âm tính tối thiểu: sửa PDF 1 byte, sửa agreementHash/dateKey/timestamp/nonce, đổi domain name/version/chain/address, chữ ký sai độ dài hoặc signer không được phép. Trường hợp `sct.signer` vắng nhưng chữ ký hợp lệ phải xử lý được ở mức phục hồi chữ ký; chính sách có chấp nhận response đó hay không cần chốt với service.
+
+**Đầu ra ngày 4:** hàm trả kết quả có lý do (`valid`, `invalid`, `unsupported`, `notConfigured`), test vector liên ngôn ngữ đạt và ghi rõ tập signer được dùng để kiểm. Chưa gọi kết quả này là bằng chứng đã neo.
+
+#### Ngày 5 — Thứ sáu 30/10: nối vào tạo hợp đồng và màn kiểm chứng
+
+1. Khi A submit PDF, app chỉ nâng trạng thái từ “SCT đã nhận” lên “SCT đã tự kiểm” sau khi verifier pass. SCT sai được giữ ở mức invalid/không dùng để khẳng định cam kết; PDF/ZIP local vẫn tải được. `notaryReceived` hiện là boolean của sự hiện diện, cần tách khỏi kết quả xác minh.
+2. Màn Kiểm chứng ZIP chạy lại cùng verifier trên `signedCommitment` trong sidecar, dùng hash PDF vừa tính từ file nhập. Hiển thị khác nhau: không có SCT, SCT có nhưng chưa kiểm được vì thiếu cấu hình, SCT không hợp lệ và SCT đã kiểm được. Dòng Merkle/RPC vẫn là “chưa kiểm” trong tuần 1.
+3. Không sửa `agreement.pdf` sau submit. Nếu sidecar cần thêm metadata trạng thái thì version hóa/kiểm tương thích; ưu tiên tính trạng thái kiểm chứng tại thời điểm xem thay vì ghi một cờ `verified=true` có thể bị sửa trong JSON.
+4. Chạy lại test parser/crypto/widget liên quan, `flutter analyze`, `flutter test`, Flutter Web build và thử thủ công ZIP tạo bởi hai browser. Kiểm bản không có service vẫn hoàn tất export và hiện đúng “chưa có SCT”.
+
+**Đầu ra ngày 5:** demo được luồng A/B → PDF hash → SCT ECDSA tự kiểm trên Web; trạng thái UI trung thực và không cần blockchain để chạy ngày hôm đó.
+
+#### 31/10–01/11: dự phòng, tích hợp fixture thật và chốt bàn giao sang tuần 2
+
+- Ưu tiên sửa lỗi giao thoa Dart/Viem, browser Web hoặc response thực; không mở thêm NFC, Drive, ảnh đính kèm hay thiết kế UI mới.
+- Chốt test vector SCT từ thành viên service, deployment/ABI/signer từ contracts, URL test và một batch/proof đã neo hoặc lịch tạo batch. Nếu chưa có, ghi rõ mục nào vẫn đang chạy bằng fixture và người chịu trách nhiệm bàn giao; các phần app độc lập vẫn có thể hoàn thành.
+- Đóng tuần bằng commit riêng trong `app/` cho parser/crypto và commit riêng cho UI/tích hợp nếu thuận tiện; mỗi commit cần test tương ứng. Push sau khi có quyền GitHub.
+
+**Điều kiện qua tuần 2:** `flutter analyze`, unit/widget tests, coordinator tests và Web build đạt; SCT hợp lệ được kiểm bằng vector service, các vector sai bị từ chối, ZIP không SCT vẫn xuất được, không có nhãn “on-chain verified” trong tuần 1. Nếu Flutter tool bị kẹt như lần kiểm trước, phải xử lý hoặc ghi chính xác bước bị kẹt; không xem việc command không ra kết quả là test pass.
+
+Các file trọng tâm: `lib/features/notary/notary_client.dart`, `lib/core/crypto/`, `lib/features/artifacts/evidence_manifest.dart`, `lib/features/artifacts/verify_bundle_page.dart`, `lib/features/agreements/create_agreement_page.dart` và test tương ứng. Không để private key notary/relayer trong Flutter defines, log hay ZIP.
 
 ### 8.3. Tuần 2 — 02/11 đến 08/11: Merkle proof và RPC Sepolia
 
