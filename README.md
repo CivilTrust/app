@@ -55,6 +55,13 @@ If the existing notary service is unavailable, ZIP export still succeeds without
 For a phone browser, `localhost` means the phone itself; use reachable HTTPS
 coordinator/notary URLs. Native iOS builds still require a Mac.
 
+For a temporary HTTPS URL shared by Windows and iPhone, run
+`./start-phone-demo.ps1` (Flutter, Node and `cloudflared` required). It builds
+the mock Web demo, serves the coordinator at the same origin and disables
+notary requests until a real HTTPS service is supplied. Keep Windows awake;
+stop with `./stop-phone-demo.ps1`. See [phone demo runbook](docs/phone-demo.md)
+for device checks, lifetime and limitations.
+
 ## Configuration
 
 Compile-time values are supplied with `--dart-define`:
@@ -68,6 +75,13 @@ Compile-time values are supplied with `--dart-define`:
 | `CHAIN_ID`          | `421614`                  |
 | `SCT_BATCH_SIGNER` | empty                     |
 | `SCT_RECEIPT_SIGNER` | empty                   |
+| `APP_ENV` | `local` (`staging` enforces reachable HTTPS configuration) |
+| `NOTARY_ENABLED` | `true` (`false` explicitly exports without SCT/network calls to notary) |
+
+Coordinator/notary URLs may also be root-relative (for example `/coordinator`)
+when served by the same Web origin. Query, fragment and credential-bearing
+endpoints are rejected by configuration checks. The **Thông tin** tab runs an
+on-demand read-only health probe; it never creates a session or submits a PDF hash.
 
 `SCT_BATCH_SIGNER` and `SCT_RECEIPT_SIGNER` are **public addresses** from the
 same registry deployment as `REGISTRY_CONTRACT`. Configure at least one signer

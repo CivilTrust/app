@@ -9,28 +9,41 @@ class AppConfig {
     required this.chainId,
     this.batchSigner = '',
     this.receiptSigner = '',
+    this.environment = 'local',
+    this.notaryEnabled = true,
   });
 
-  factory AppConfig.fromEnvironment() => const AppConfig(
-    coordinatorBaseUrl: String.fromEnvironment(
-      'COORDINATOR_URL',
-      defaultValue: 'http://localhost:8788',
+  factory AppConfig.fromEnvironment({Uri? pageUri}) => AppConfig(
+    coordinatorBaseUrl: resolveEndpoint(
+      const String.fromEnvironment(
+        'COORDINATOR_URL',
+        defaultValue: 'http://localhost:8788',
+      ),
+      pageUri ?? Uri.base,
     ),
-    notaryBaseUrl: String.fromEnvironment(
-      'NOTARY_URL',
-      defaultValue: 'http://localhost:8787',
+    notaryBaseUrl: resolveEndpoint(
+      const String.fromEnvironment(
+        'NOTARY_URL',
+        defaultValue: 'http://localhost:8787',
+      ),
+      pageUri ?? Uri.base,
     ),
-    rpcUrl: String.fromEnvironment(
+    rpcUrl: const String.fromEnvironment(
       'ARBITRUM_RPC_URL',
       defaultValue: 'https://sepolia-rollup.arbitrum.io/rpc',
     ),
-    registryContract: String.fromEnvironment(
+    registryContract: const String.fromEnvironment(
       'REGISTRY_CONTRACT',
       defaultValue: '0x0000000000000000000000000000000000000000',
     ),
-    chainId: int.fromEnvironment('CHAIN_ID', defaultValue: 421614),
-    batchSigner: String.fromEnvironment('SCT_BATCH_SIGNER'),
-    receiptSigner: String.fromEnvironment('SCT_RECEIPT_SIGNER'),
+    chainId: const int.fromEnvironment('CHAIN_ID', defaultValue: 421614),
+    batchSigner: const String.fromEnvironment('SCT_BATCH_SIGNER'),
+    receiptSigner: const String.fromEnvironment('SCT_RECEIPT_SIGNER'),
+    environment: const String.fromEnvironment('APP_ENV', defaultValue: 'local'),
+    notaryEnabled: const bool.fromEnvironment(
+      'NOTARY_ENABLED',
+      defaultValue: true,
+    ),
   );
 
   final String coordinatorBaseUrl;
@@ -40,6 +53,26 @@ class AppConfig {
   final int chainId;
   final String batchSigner;
   final String receiptSigner;
+  final String environment;
+  final bool notaryEnabled;
+
+  /// Only root-relative endpoints are supported. Never inherit an invite's
+  /// query or fragment when constructing a network endpoint.
+  static String resolveEndpoint(String value, Uri pageUri) {
+    if (!value.startsWith('/') || value.startsWith('//')) {
+      return value.replaceFirst(RegExp(r'/+$'), '');
+    }
+    final relative = Uri.tryParse(value);
+    if (relative == null) return value;
+    return Uri(
+      scheme: pageUri.scheme,
+      host: pageUri.host,
+      port: pageUri.hasPort ? pageUri.port : null,
+      path: relative.path.replaceFirst(RegExp(r'/+$'), ''),
+      query: relative.hasQuery ? relative.query : null,
+      fragment: relative.hasFragment ? relative.fragment : null,
+    ).toString();
+  }
 
   bool get hasRegistry =>
       RegExp(r'^0x[0-9a-fA-F]{40}$').hasMatch(registryContract) &&

@@ -1,4 +1,5 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { corsPolicy } from "./cors.js";
 
 const JSON_LIMIT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
@@ -11,16 +12,6 @@ function json(response, status, payload, extraHeaders = {}) {
     ...extraHeaders,
   });
   response.end(JSON.stringify(payload));
-}
-
-function corsHeaders(request) {
-  const origin = request.headers.origin ?? "*";
-  return {
-    "access-control-allow-origin": origin,
-    "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
-    "access-control-allow-headers": "Authorization, Content-Type",
-    vary: "Origin",
-  };
 }
 
 async function readJson(request) {
@@ -76,7 +67,7 @@ function validEnvelope(value) {
   );
 }
 
-export function createCoordinator({ now = () => Date.now() } = {}) {
+export function createCoordinator({ now = () => Date.now(), allowedOrigins = null, maxSessions = 200 } = {}) {
   const sessions = new Map();
 
   function findSession(id) {
@@ -90,8 +81,21 @@ export function createCoordinator({ now = () => Date.now() } = {}) {
   }
 
   return async function coordinatorHandler(request, response) {
-    const headers = corsHeaders(request);
+    const policy = corsPolicy(request, allowedOrigins);
+    const headers = policy.headers;
+    if (!policy.allowed) {
+      json(response, 403, { error: "Origin is not allowed" }, headers);
+      return;
+    }
     if (request.method === "OPTIONS") {
+      const method = request.headers["access-control-request-method"];
+      const requestedHeaders = (request.headers["access-control-request-headers"] ?? "")
+        .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
+      if ((method && !["GET", "POST", "PUT", "DELETE"].includes(method)) ||
+          requestedHeaders.some((value) => !["authorization", "content-type"].includes(value))) {
+        json(response, 403, { error: "Preflight is not allowed" }, headers);
+        return;
+      }
       response.writeHead(204, headers);
       response.end();
       return;
@@ -114,6 +118,13 @@ export function createCoordinator({ now = () => Date.now() } = {}) {
 
     try {
       if (request.method === "POST" && url.pathname === "/v1/sessions") {
+        // Public demo has bounded in-memory storage; expired sessions are
+        // reclaimed without retaining or logging capabilities/payloads.
+        for (const id of sessions.keys()) findSession(id);
+        if (sessions.size >= maxSessions) {
+          json(response, 503, { error: "Demo session capacity reached; try again after expiry" }, headers);
+          return;
+        }
         const body = await readJson(request);
         if (!validEnvelope(body.encryptedPayload)) {
           json(response, 400, { error: "encryptedPayload is required" }, headers);

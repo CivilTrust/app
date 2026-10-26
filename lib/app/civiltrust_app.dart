@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../core/config/app_config.dart';
+import '../core/config/environment_check.dart';
+import '../features/diagnostics/environment_page.dart';
 import '../features/agreements/create_agreement_page.dart';
 import '../features/agreements/join_agreement_page.dart';
 import '../features/artifacts/verify_bundle_page.dart';
@@ -70,11 +72,19 @@ class _CivilTrustHomeState extends State<CivilTrustHome> {
 
   @override
   Widget build(BuildContext context) {
+    final blocksSession = checkEnvironment(config, Uri.base).any(
+      (issue) =>
+          {'Coordinator', 'Trang Web', 'Môi trường'}.contains(issue.target),
+    );
     final pages = [
-      CreateAgreementPage(config: config),
-      JoinAgreementPage(config: config),
+      blocksSession
+          ? EnvironmentPage(config: config)
+          : CreateAgreementPage(config: config),
+      blocksSession
+          ? EnvironmentPage(config: config)
+          : JoinAgreementPage(config: config),
       VerifyBundlePage(config: config),
-      _AboutPage(config: config),
+      EnvironmentPage(config: config),
     ];
     return Scaffold(
       appBar: AppBar(
@@ -144,42 +154,4 @@ class _CivilTrustHomeState extends State<CivilTrustHome> {
       ),
     );
   }
-}
-
-class _AboutPage extends StatelessWidget {
-  const _AboutPage({required this.config});
-  final AppConfig config;
-
-  @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(24),
-    children: [
-      const Text(
-        'Cấu hình và giới hạn MVP',
-        style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800),
-      ),
-      const SizedBox(height: 16),
-      Card(
-        child: Padding(
-          padding: const EdgeInsets.all(20),
-          child: SelectableText(
-            'Coordinator: ${config.coordinatorBaseUrl}\n'
-            'Notary: ${config.notaryBaseUrl}\n'
-            'Chain ID: ${config.chainId}\nRegistry: ${config.registryContract}',
-          ),
-        ),
-      ),
-      const SizedBox(height: 16),
-      const Card(
-        child: Padding(
-          padding: EdgeInsets.all(20),
-          child: Text(
-            'CCCD và chữ ký thiết bị hiện là mock có thể kiểm chứng. NFC thật trên iPhone '
-            'sẽ thay IdentityReader bằng Core NFC mà không đổi luồng hợp đồng. App không tự '
-            'khẳng định tiền đã đến; Bên A phải kiểm tra app ngân hàng trước khi xác nhận.',
-          ),
-        ),
-      ),
-    ],
-  );
 }

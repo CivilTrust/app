@@ -5,6 +5,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/flow_widgets.dart';
 import '../../core/config/app_config.dart';
+import '../../core/config/environment_check.dart';
 import '../../core/crypto/hash_service.dart';
 import '../../core/encoding/encoding_utils.dart';
 import '../../core/formatting/display_formatters.dart';
@@ -19,6 +20,7 @@ import '../notary/sct_verifier.dart';
 import '../notary/signed_commitment_token.dart';
 import '../payment/vietqr_service.dart';
 import '../sessions/remote_session_repository.dart';
+import '../sessions/invite_url.dart';
 import '../sessions/session_models.dart';
 import '../signing/mock_party_signer.dart';
 import '../signing/session_validator.dart';
@@ -174,7 +176,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     version = created.version;
     expiresAt = created.expiresAt;
     final fragment = created.participant.toInviteFragment();
-    inviteUrl = Uri.base.replace(fragment: 'join=$fragment').toString();
+    inviteUrl = buildInviteUrl(Uri.base, fragment);
     stage = 4;
     message = 'Đã khóa nội dung. Gửi link cho Bên B để xác minh và ký.';
   });
@@ -252,8 +254,13 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     sctVerification = null;
     SignedCommitmentToken? receivedSct;
     try {
-      receivedSct = await NotaryClient(widget.config.notaryBaseUrl)
-          .submit(result.evidence.documentHash);
+      if (!widget.config.notaryEnabled) {
+        message = 'Hoàn tất offline. Bản demo đã tắt Notary; ZIP không có SCT.';
+      } else {
+        _checkNotaryConfiguration();
+        receivedSct = await NotaryClient(widget.config.notaryBaseUrl)
+            .submit(result.evidence.documentHash);
+      }
     } catch (error) {
       message = 'Hoàn tất offline. Notary chưa sẵn sàng: $error';
     }
@@ -285,6 +292,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
   });
 
   Future<void> refreshNotaryStatus() => _run(() async {
+    _checkNotaryConfiguration();
     final status = await NotaryClient(widget.config.notaryBaseUrl)
         .status(bundle!.evidence.documentHash);
     final value = status['status']?.toString();
@@ -295,6 +303,18 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       _ => 'Notary trả trạng thái: ${value ?? 'không xác định'}.',
     };
   });
+
+  void _checkNotaryConfiguration() {
+    if (!widget.config.notaryEnabled ||
+        checkEnvironment(widget.config, Uri.base).any(
+          (issue) =>
+              {'Notary', 'Trang Web', 'Môi trường'}.contains(issue.target),
+        )) {
+      throw const NotaryClientException(
+        'Notary chưa được cấu hình phù hợp. Kiểm tra mục Thông tin.',
+      );
+    }
+  }
 
   Future<void> _run(Future<void> Function() operation) async {
     setState(() => busy = true);
@@ -812,7 +832,9 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
         ),
         const SizedBox(height: 16),
         OutlinedButton.icon(
-          onPressed: busy ? null : refreshNotaryStatus,
+          onPressed: busy || !widget.config.notaryEnabled
+              ? null
+              : refreshNotaryStatus,
           icon: const Icon(Icons.sync),
           label: const Text('Kiểm tra trạng thái Notary'),
         ),
