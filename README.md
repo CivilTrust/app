@@ -80,7 +80,7 @@ Windows can develop and test the Flutter Web/shared Dart code, but cannot build 
 - Coordinator storage is in memory; restarting it deletes sessions.
 - Invite fragments are bearer capabilities. Share them over a trusted channel and never log them.
 - Google Drive is deferred because OAuth, consent, token storage, and Drive scopes add deployment work. ZIP export/import is the portable baseline; a Drive repository can upload the exact same ZIP later.
-- The app submits to the existing notary service, but local EIP-712 SCT verification, proof polling, Merkle verification, and direct RPC verification remain the next integration milestone.
+- The app has a pure-Dart EIP-712 SCT verifier with secp256k1 signer recovery and deployment-scoped trust policy, validated against a Viem fixture. Wiring that verifier into the UI/config, proof polling, Merkle verification, and direct RPC verification remain the next integration milestones.
 - The payment receipt is an explicit Party A confirmation in the final evidence, not proof from a bank API.
 
 Detailed architecture and phased work are in [plan.md](plan.md). Coordinator API details are in [coordinator/README.md](coordinator/README.md).

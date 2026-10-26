@@ -446,6 +446,8 @@ Kế hoạch này bắt đầu ngày 25/10/2026. Một người làm phần `app
 
 **Đầu ra ngày 4:** hàm trả kết quả có lý do (`valid`, `invalid`, `unsupported`, `notConfigured`), test vector liên ngôn ngữ đạt và ghi rõ tập signer được dùng để kiểm. Chưa gọi kết quả này là bằng chứng đã neo.
 
+**Trạng thái 26/10/2026:** đã triển khai verifier thuần Dart và vector `viem@2.56.5` trong `app/`; chi tiết và giới hạn cấu hình nằm tại `docs/week1-day3-4-eip712.md`. Địa chỉ contract/signer hiện là fixture test, chưa phải deployment Arbitrum Sepolia nên runtime phải giữ mức `notConfigured` cho tới khi nhận cấu hình thật.
+
 #### Ngày 5 — Thứ sáu 30/10: nối vào tạo hợp đồng và màn kiểm chứng
 
 1. Khi A submit PDF, app chỉ nâng trạng thái từ “SCT đã nhận” lên “SCT đã tự kiểm” sau khi verifier pass. SCT sai được giữ ở mức invalid/không dùng để khẳng định cam kết; PDF/ZIP local vẫn tải được. `notaryReceived` hiện là boolean của sự hiện diện, cần tách khỏi kết quả xác minh.
