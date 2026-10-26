@@ -26,10 +26,16 @@ Ghi nhận ngày 25/10/2026 trên Windows, trước mốc kế hoạch 26/10. Re
 
 Luồng ZIP offline được test tự động: hai chữ ký mock và xác nhận thanh toán tạo `agreement.pdf`, `evidence.civiltrust.json`; import ZIP đối chiếu hash PDF và phát hiện PDF bị sửa. Test mới xác nhận thêm SCT chỉ đổi sidecar, giữ nguyên byte PDF và `documentHash`.
 
-**Nghiệm thu UI một phần:** trên bản Web localhost, A chọn mẫu đặt cọc, dùng danh tính mock, điền điều khoản, khóa và ký thành công. Màn A hiển thị link invite và VietQR đúng số tiền mô phỏng. Nút sao chép báo thành công nhưng clipboard trong trình duyệt cô lập của công cụ kiểm thử vẫn rỗng; Chrome thường không được công cụ này kết nối. Vì vậy chưa hoàn tất thao tác B, xác nhận A, tải ZIP hoặc kiểm font PDF qua UI; chưa có ZIP mẫu từ thao tác UI để bàn giao. Đây là giới hạn môi trường kiểm UI, chưa đủ bằng chứng kết luận nút copy lỗi trên Chrome thật. Live coordinator test chứng minh hai client Dart trao đổi được phiên, nhưng không thay thế thao tác UI. Cần chạy checklist trong `README.md` với hai browser profile và giữ ZIP demo không chứa PII thật. `localhost` trên điện thoại trỏ về điện thoại, nên thử iPhone Safari chỉ sau khi có endpoint HTTPS truy cập được.
+## Nghiệm thu UI bổ sung ngày 26/10/2026
+
+Đã chạy luồng localhost với ba tab browser cô lập A, B và người kiểm chứng trên bản Web build mới, dùng coordinator local và dữ liệu CCCD/tài khoản **mô phỏng**. A tạo hợp đồng đặt cọc xe máy: tổng giá trị 20.000.000 VND, tiền cọc 2.000.000 VND, hạn 31/10/2026; khóa nội dung và ký Ed25519 mock. Link mời mở được ở tab B; B đọc nội dung, nạp danh tính mock, ký cùng digest rồi đánh dấu đã chuyển tiền **chỉ để kiểm luồng, không chuyển tiền thật**. A làm mới, thấy hai trạng thái của B, xác nhận thủ công và tạo hồ sơ offline. B làm mới và thấy A đã xác nhận. Màn A hiển thị VietQR đúng 2.000.000 VND.
+
+ZIP tải từ UI chứa `agreement.pdf` và `evidence.civiltrust.json`. Import ZIP mới ở tab kiểm chứng độc lập cho kết quả: PDF hash, canonical evidence hash và cả hai chữ ký Ed25519 mock đều hợp lệ. Xác nhận nhận tiền **có dữ liệu nhưng chưa được ngân hàng kiểm chứng**. Không có SCT hoặc Merkle proof vì notary không chạy; UI cũng không báo đã xác thực on-chain. PDF thật được render kiểm tra cả 2 trang A4: dấu tiếng Việt đọc được, nhãn `Số tiền đặt cọc: 2.000.000 VNĐ` không nhầm với tổng giá trị giao dịch, thông báo bản demo hiển thị và khối danh tính/chữ ký B không bị tách qua trang.
+
+Trình duyệt kiểm thử cô lập vẫn không đọc được clipboard sau nút copy, nên UI đã bổ sung ô link mời chỉ đọc để chọn/sao chép thủ công; không đủ bằng chứng kết luận nút copy lỗi trên Chrome thông thường. Ba tab cô lập **không thay thế** kiểm thử hai profile Chrome hoặc hai thiết bị thật. PDF vẫn ghi phần định danh B trong điều khoản đã khóa dưới dạng placeholder, rồi ghi danh tính B ở khối chữ ký: đây là hệ quả của việc A ký nội dung trước khi B xác minh, cần chốt mô hình dữ liệu cho bản sau. `localhost` trên điện thoại trỏ về điện thoại, nên thử iPhone Safari chỉ sau khi có endpoint HTTPS truy cập được.
 
 ## Mốc kiểm tiếp theo
 
-1. Hai profile: A tạo và ký, B mở invite và ký/báo chuyển, A xác nhận sau khi tự xem app ngân hàng, tải ZIP.
-2. Import ZIP trên browser độc lập; xác nhận `agreement.pdf` và `evidence.civiltrust.json` có mặt, hash PDF trùng `documentHash`.
-3. Chạy lại với service thật ở đúng port; xác nhận cả response `201` và submit lặp `200` được lưu SCT nhưng UI vẫn chỉ báo đã nhận, chưa báo đã tự kiểm chữ ký.
+1. Chạy lại trên hai profile Chrome hoặc hai thiết bị thật; kiểm thao tác copy/paste invite, session/capability, responsive và tải ZIP. Dùng bản demo không chứa PII thật; chỉ xác nhận nhận tiền sau khi có giao dịch testnet/ngân hàng phù hợp, không dùng kết quả mô phỏng làm bằng chứng thanh toán.
+2. Chạy với service thật ở đúng port; xác nhận cả response `201` và submit lặp `200` được lưu SCT nhưng UI vẫn chỉ báo đã nhận, chưa báo đã tự kiểm chữ ký.
+3. Khi contracts/service có deployment testnet và Merkle proof, kiểm chứng từ ZIP tới chữ ký SCT, proof và on-chain; không gắn nhãn xác thực pháp lý vượt quá lớp bằng chứng đã kiểm.

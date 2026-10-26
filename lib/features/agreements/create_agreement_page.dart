@@ -638,8 +638,12 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
                 ),
               ],
               const SizedBox(height: 8),
-              SelectableText(
-                inviteUrl!,
+              TextFormField(
+                key: ValueKey(inviteUrl),
+                initialValue: inviteUrl,
+                readOnly: true,
+                maxLines: null,
+                decoration: const InputDecoration(border: InputBorder.none),
                 style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
               ),
               const SizedBox(height: 8),

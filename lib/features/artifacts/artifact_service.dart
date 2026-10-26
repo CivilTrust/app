@@ -92,6 +92,11 @@ class ArtifactService {
     final bold = await _boldFont();
     final doc = pw.Document();
     final d = session.draft;
+    final amountLabel = switch (d.templateId) {
+      'deposit-v1' => 'Số tiền đặt cọc',
+      'loan-v1' => 'Số tiền vay',
+      _ => 'Giá trị giao dịch',
+    };
     doc.addPage(
       pw.MultiPage(
         theme: pw.ThemeData.withFont(base: regular, bold: bold),
@@ -103,10 +108,15 @@ class ArtifactService {
             'Mẫu dữ liệu: ${d.templateId}',
             style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
           ),
+          pw.Text(
+            'BẢN DEMO: danh tính mô phỏng, chữ ký Ed25519 tạm thời; '
+            'xác nhận nhận tiền do Bên A tự khai.',
+            style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey700),
+          ),
           pw.SizedBox(height: 12),
           pw.Text(d.terms),
           pw.SizedBox(height: 12),
-          pw.Text('Giá trị giao dịch: ${DisplayFormatters.vnd(d.amountVnd)}'),
+          pw.Text('$amountLabel: ${DisplayFormatters.vnd(d.amountVnd)}'),
           pw.Divider(),
           _signatureBlock(
             'Bên A',
@@ -148,30 +158,32 @@ class ArtifactService {
         : const <String, dynamic>{};
     String value(String key) => attributes[key]?.toString() ?? '';
 
-    return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 6),
-      child: pw.Column(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text(
-            '$label: ${identity['displayName'] ?? 'Chưa rõ'}',
-            style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
-          ),
-          if (value('dateOfBirth').isNotEmpty)
-            pw.Text('Ngày sinh: ${value('dateOfBirth')}'),
-          if (value('documentNumber').isNotEmpty)
-            pw.Text('Số CCCD: ${value('documentNumber')}'),
-          if (value('issuedDate').isNotEmpty || value('issuedBy').isNotEmpty)
+    return pw.Inseparable(
+      child: pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 6),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
             pw.Text(
-              'Cấp ngày: ${value('issuedDate')} · Nơi cấp: ${value('issuedBy')}',
+              '$label: ${identity['displayName'] ?? 'Chưa rõ'}',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
             ),
-          if (value('permanentAddress').isNotEmpty)
-            pw.Text('Thường trú: ${value('permanentAddress')}'),
-          if (value('currentAddress').isNotEmpty)
-            pw.Text('Nơi ở hiện tại: ${value('currentAddress')}'),
-          pw.Text('CCCD commitment: ${identity['identityCommitment'] ?? ''}'),
-          pw.Text('Ký lúc: ${at.toUtc().toIso8601String()}'),
-        ],
+            if (value('dateOfBirth').isNotEmpty)
+              pw.Text('Ngày sinh: ${value('dateOfBirth')}'),
+            if (value('documentNumber').isNotEmpty)
+              pw.Text('Số CCCD: ${value('documentNumber')}'),
+            if (value('issuedDate').isNotEmpty || value('issuedBy').isNotEmpty)
+              pw.Text(
+                'Cấp ngày: ${value('issuedDate')} · Nơi cấp: ${value('issuedBy')}',
+              ),
+            if (value('permanentAddress').isNotEmpty)
+              pw.Text('Thường trú: ${value('permanentAddress')}'),
+            if (value('currentAddress').isNotEmpty)
+              pw.Text('Nơi ở hiện tại: ${value('currentAddress')}'),
+            pw.Text('CCCD commitment: ${identity['identityCommitment'] ?? ''}'),
+            pw.Text('Ký lúc: ${at.toUtc().toIso8601String()}'),
+          ],
+        ),
       ),
     );
   }
