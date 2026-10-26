@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/flow_widgets.dart';
 import '../../core/config/app_config.dart';
@@ -9,7 +8,8 @@ import '../../core/formatting/display_formatters.dart';
 import '../../core/models/agreement.dart';
 import '../../core/models/identity_evidence.dart';
 import '../identity/mock_identity_reader.dart';
-import '../payment/vietqr_service.dart';
+import '../payment/payment_qr_card.dart';
+import '../payment/payment_details.dart';
 import '../sessions/remote_session_repository.dart';
 import '../sessions/session_models.dart';
 import '../signing/mock_party_signer.dart';
@@ -77,6 +77,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
   });
 
   Future<void> identify() => _run(() async {
+    PaymentDetails.fromDraft(session!.draft);
     if (!identityConsent) {
       throw StateError('Bạn phải đồng ý đọc dữ liệu CCCD mô phỏng.');
     }
@@ -86,6 +87,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
   });
 
   Future<void> sign() => _run(() async {
+    PaymentDetails.fromDraft(session!.draft);
     if (!accepted) {
       throw StateError('Bạn phải xác nhận đã đọc và đồng ý.');
     }
@@ -201,79 +203,103 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
     ),
   );
 
-  Widget _readStep() => Column(
-    children: [
-      SectionCard(
-        title: session!.draft.title,
-        icon: Icons.description_outlined,
-        child: Container(
+  Widget _readStep() {
+    PaymentDetails? payment;
+    try {
+      payment = PaymentDetails.fromDraft(session!.draft);
+    } on FormatException {
+      /* Show a safe error below, not untrusted values. */
+    } on ArgumentError {
+      /* Legacy unsupported fields must not crash the page. */
+    }
+    return Column(
+      children: [
+        SectionCard(
+          title: session!.draft.title,
+          icon: Icons.description_outlined,
+          child: Container(
+            width: double.infinity,
+            constraints: const BoxConstraints(maxHeight: 480),
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: const Color(0xfffffdf7),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xffe7dfcc)),
+            ),
+            child: SingleChildScrollView(
+              child: SelectableText(
+                session!.draft.terms,
+                style: const TextStyle(height: 1.55),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 14),
+        if (payment != null)
+          SectionCard(
+            title: 'Thông tin chuyển khoản đã khóa',
+            icon: Icons.account_balance,
+            child: SelectableText(payment.copyText),
+          )
+        else
+          const TrustNotice(
+            title: 'Thông tin chuyển khoản chưa được hỗ trợ',
+            message: 'Hãy liên hệ Bên A để kiểm tra và tạo phiên mới. Không sửa nội dung đã ký.',
+          ),
+        const SizedBox(height: 14),
+        SectionCard(
+          title: 'Thông tin phiên ký',
+          icon: Icons.shield_outlined,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                session!.draft.templateId == 'loan-v1'
+                    ? 'Vai trò: Bên B · Bên cho vay'
+                    : 'Vai trò: Bên B · Bên đặt cọc',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              Text(
+                'Số tiền chuyển: ${DisplayFormatters.vnd(session!.draft.amountVnd)}',
+              ),
+              if (expiresAt != null)
+                Text(
+                  'Phiên hết hạn: ${DisplayFormatters.dateTime(expiresAt!)}',
+                ),
+              const SizedBox(height: 10),
+              const TrustNotice(
+                title: 'Chữ ký demo',
+                message: 'Bạn sẽ ký digest nội dung bằng khóa Ed25519 tạm thời. Đây chưa phải chữ ký số được chứng nhận.',
+              ),
+              const SizedBox(height: 10),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: identityConsent,
+                onChanged: (value) =>
+                    setState(() => identityConsent = value ?? false),
+                title: const Text(
+                  'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo',
+                ),
+                subtitle: const Text(
+                  'Consent này không đồng nghĩa đồng ý nội dung hợp đồng.',
+                ),
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
           width: double.infinity,
-          constraints: const BoxConstraints(maxHeight: 480),
-          padding: const EdgeInsets.all(18),
-          decoration: BoxDecoration(
-            color: const Color(0xfffffdf7),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xffe7dfcc)),
-          ),
-          child: SingleChildScrollView(
-            child: SelectableText(
-              session!.draft.terms,
-              style: const TextStyle(height: 1.55),
-            ),
+          child: FilledButton.icon(
+            onPressed: identityConsent && payment != null ? identify : null,
+            icon: const Icon(Icons.nfc),
+            label: const Text('Tôi đã đọc · Xác minh CCCD Bên B'),
           ),
         ),
-      ),
-      const SizedBox(height: 14),
-      SectionCard(
-        title: 'Thông tin phiên ký',
-        icon: Icons.shield_outlined,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              session!.draft.templateId == 'loan-v1'
-                  ? 'Vai trò: Bên B · Bên cho vay'
-                  : 'Vai trò: Bên B · Bên đặt cọc',
-              style: const TextStyle(fontWeight: FontWeight.w700),
-            ),
-            Text(
-              'Số tiền chuyển: ${DisplayFormatters.vnd(session!.draft.amountVnd)}',
-            ),
-            if (expiresAt != null)
-              Text('Phiên hết hạn: ${DisplayFormatters.dateTime(expiresAt!)}'),
-            const SizedBox(height: 10),
-            const TrustNotice(
-              title: 'Chữ ký demo',
-              message: 'Bạn sẽ ký digest nội dung bằng khóa Ed25519 tạm thời. Đây chưa phải chữ ký số được chứng nhận.',
-            ),
-            const SizedBox(height: 10),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              value: identityConsent,
-              onChanged: (value) =>
-                  setState(() => identityConsent = value ?? false),
-              title: const Text(
-                'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo',
-              ),
-              subtitle: const Text(
-                'Consent này không đồng nghĩa đồng ý nội dung hợp đồng.',
-              ),
-              controlAffinity: ListTileControlAffinity.leading,
-            ),
-          ],
-        ),
-      ),
-      const SizedBox(height: 14),
-      SizedBox(
-        width: double.infinity,
-        child: FilledButton.icon(
-          onPressed: identityConsent ? identify : null,
-          icon: const Icon(Icons.nfc),
-          label: const Text('Tôi đã đọc · Xác minh CCCD Bên B'),
-        ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 
   Widget _identityStep() => Column(
     children: [
@@ -314,47 +340,12 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
 
   Widget _paymentStep() {
     final draft = session!.draft;
-    final qr = const VietQrService().build(
-      bankBin: draft.fields['bankBin'] ?? '',
-      accountNumber: draft.fields['accountNumber'] ?? '',
-      amount: draft.amountVnd,
-      purpose: 'CIVILTRUST ${draft.id.substring(0, 8)}',
-    );
-    return SectionCard(
-      title: 'Chuyển khoản cho Bên A',
-      icon: Icons.account_balance,
-      child: Center(
-        child: Column(
-          children: [
-            QrImageView(data: qr, size: 230),
-            const SizedBox(height: 8),
-            Text(
-              '${draft.fields['accountName']} · ${draft.fields['accountNumber']}',
-              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
-            ),
-            Text(
-              DisplayFormatters.vnd(draft.amountVnd),
-              style: const TextStyle(
-                fontSize: 20,
-                fontWeight: FontWeight.w800,
-                color: Color(0xff0f766e),
-              ),
-            ),
-            const SizedBox(height: 6),
-            const Text(
-              'Quét bằng app ngân hàng. Kiểm tra lại người nhận và số tiền trước khi xác nhận.',
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton.icon(
-                onPressed: busy ? null : markTransferred,
-                icon: const Icon(Icons.send),
-                label: const Text('Tôi đã thực hiện chuyển khoản'),
-              ),
-            ),
-          ],
-        ),
+    return PaymentQrCard(
+      draft: draft,
+      footer: FilledButton.icon(
+        onPressed: busy ? null : markTransferred,
+        icon: const Icon(Icons.send),
+        label: const Text('Tôi đã thực hiện chuyển khoản'),
       ),
     );
   }

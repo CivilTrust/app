@@ -41,5 +41,29 @@ void main() {
     expect(validator.validateBankBin('VCB'), isNotNull);
     expect(validator.validateAccountNumber('1234567890'), isNull);
     expect(validator.validateAccountNumber('12 34'), isNotNull);
+    expect(validator.validateAccountNumber('A' * 19), isNull);
+    expect(validator.validateAccountNumber('A' * 20), isNotNull);
+  });
+
+  test('payment amounts are bounded before a Web draft is frozen', () {
+    final amountField = ContractTemplateService.loan.fields.firstWhere(
+      (field) => field.key == 'principalAmount',
+    );
+    expect(
+      validator.validateField(
+        ContractTemplateService.loan,
+        amountField,
+        '9999999999999',
+      ),
+      isNull,
+    );
+    expect(
+      validator.validateField(
+        ContractTemplateService.loan,
+        amountField,
+        '10000000000000',
+      ),
+      contains('13 chữ số'),
+    );
   });
 }

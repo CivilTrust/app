@@ -1,4 +1,5 @@
 import 'contract_template.dart';
+import '../payment/vietqr_service.dart';
 
 class AgreementValidator {
   const AgreementValidator();
@@ -21,6 +22,8 @@ class AgreementValidator {
         }
       } else if (parsed <= 0) {
         return 'Số tiền phải lớn hơn 0';
+      } else if (parsed > VietQrService.maxAmount) {
+        return 'Số tiền không quá 13 chữ số';
       }
     }
 
@@ -54,7 +57,7 @@ class AgreementValidator {
   String? validateBankBin(String? rawValue) {
     final value = rawValue?.trim() ?? '';
     if (value.isEmpty) return 'Không được để trống';
-    return RegExp(r'^\d{6}$').hasMatch(value)
+    return VietQrService.isBankBin(value)
         ? null
         : 'Mã BIN phải gồm đúng 6 chữ số';
   }
@@ -62,9 +65,9 @@ class AgreementValidator {
   String? validateAccountNumber(String? rawValue) {
     final value = rawValue?.trim() ?? '';
     if (value.isEmpty) return 'Không được để trống';
-    return RegExp(r'^[A-Za-z0-9]{4,30}$').hasMatch(value)
+    return VietQrService.isAccountNumber(value)
         ? null
-        : 'Số tài khoản gồm 4–30 ký tự chữ hoặc số';
+        : 'Số tài khoản gồm 4–19 ký tự chữ hoặc số';
   }
 
   DateTime? parseDate(String value) {

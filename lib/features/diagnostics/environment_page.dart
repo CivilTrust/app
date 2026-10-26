@@ -4,6 +4,7 @@ import '../../core/config/app_config.dart';
 import '../../core/config/environment_check.dart';
 import '../../app/flow_widgets.dart';
 import 'connectivity_service.dart';
+import '../payment/vietqr_preview_page.dart';
 
 class EnvironmentPage extends StatefulWidget {
   const EnvironmentPage({
@@ -101,6 +102,14 @@ class _EnvironmentPageState extends State<EnvironmentPage> {
                 ),
             ],
           ),
+        ),
+        const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const VietQrPreviewPage()),
+          ),
+          icon: const Icon(Icons.qr_code),
+          label: const Text('Thử VietQR cục bộ'),
         ),
         const SizedBox(height: 16),
         const TrustNotice(

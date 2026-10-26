@@ -1,7 +1,6 @@
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/flow_widgets.dart';
 import '../../core/config/app_config.dart';
@@ -18,7 +17,8 @@ import '../notary/notary_client.dart';
 import '../notary/sct_verification_text.dart';
 import '../notary/sct_verifier.dart';
 import '../notary/signed_commitment_token.dart';
-import '../payment/vietqr_service.dart';
+import '../payment/payment_details.dart';
+import '../payment/payment_qr_card.dart';
 import '../sessions/remote_session_repository.dart';
 import '../sessions/invite_url.dart';
 import '../sessions/session_models.dart';
@@ -45,6 +45,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
   final controllers = <String, TextEditingController>{};
   final formKey = GlobalKey<FormState>();
   ContractTemplate? selectedTemplate;
+  AgreementDraft? reviewDraft;
   IdentityEvidence? identityA;
   SigningSession? session;
   SessionCapabilities? owner;
@@ -78,6 +79,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     });
     setState(() {
       selectedTemplate = template;
+      reviewDraft = null;
       stage = 1;
       identityConsent = false;
       message = '';
@@ -131,7 +133,27 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       setState(() => message = 'Số tiền thanh toán phải lớn hơn 0.');
       return false;
     }
+    final draftId = createAgreementId();
+    final paymentFields = {
+      ...fields,
+      'paymentQrProfile': PaymentDetails.profile,
+      'paymentPurpose': PaymentDetails.purposeFor(draftId),
+    };
+    final reviewed = AgreementDraft(
+      id: draftId,
+      title: selectedTemplate!.title,
+      terms: reviewText,
+      amountVnd: amount,
+      createdAt: DateTime.now().toUtc(),
+      templateId: selectedTemplate!.id,
+      fields: Map.unmodifiable(paymentFields),
+    );
+    // Validate everything before presenting the exact immutable snapshot A
+    // will sign, including reference/version and beneficiary fields.
+    PaymentDetails.fromDraft(reviewed);
     setState(() {
+      reviewDraft = reviewed;
+      confirmedReview = false;
       stage = 3;
       message = '';
     });
@@ -148,16 +170,8 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     if (!confirmedReview) {
       throw StateError('Bạn phải xác nhận đã đọc nội dung.');
     }
-    final amount = templateService.amountFor(selectedTemplate!, fields);
-    final draft = AgreementDraft(
-      id: createAgreementId(),
-      title: selectedTemplate!.title,
-      terms: reviewText,
-      amountVnd: amount,
-      createdAt: DateTime.now().toUtc(),
-      templateId: selectedTemplate!.id,
-      fields: fields,
-    );
+    final draft = reviewDraft;
+    if (draft == null) throw StateError('Hãy xem lại thông tin trước khi ký.');
     final digest = hash.canonicalObjectHash(draft.toJson());
     final signature = await signer.sign(
       role: 'partyA',
@@ -330,6 +344,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     setState(() {
       stage = 0;
       selectedTemplate = null;
+      reviewDraft = null;
       identityA = null;
       session = null;
       owner = null;
@@ -592,11 +607,17 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
           ),
           child: SingleChildScrollView(
             child: SelectableText(
-              reviewText,
+              reviewDraft!.terms,
               style: const TextStyle(height: 1.55),
             ),
           ),
         ),
+      ),
+      const SizedBox(height: 12),
+      SectionCard(
+        title: 'Thông tin chuyển khoản sẽ được khóa',
+        icon: Icons.account_balance,
+        child: SelectableText(PaymentDetails.fromDraft(reviewDraft!).copyText),
       ),
       const SizedBox(height: 12),
       const TrustNotice(
@@ -643,12 +664,6 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
 
   Widget _shareStep() {
     final draft = session!.draft;
-    final qr = const VietQrService().build(
-      bankBin: draft.fields['bankBin']!,
-      accountNumber: draft.fields['accountNumber']!,
-      amount: draft.amountVnd,
-      purpose: 'CIVILTRUST ${draft.id.substring(0, 8)}',
-    );
     final bSigned = session!.partyB != null;
     final transferSent = session!.state == AgreementState.paymentPending;
     return Column(
@@ -688,22 +703,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
           ),
         ),
         const SizedBox(height: 16),
-        SectionCard(
-          title: 'Mã QR chuyển khoản',
-          icon: Icons.qr_code_2,
-          child: Center(
-            child: Column(
-              children: [
-                QrImageView(data: qr, size: 210),
-                Text(
-                  '${draft.fields['accountName']} · ${draft.fields['accountNumber']}',
-                  style: const TextStyle(fontWeight: FontWeight.w700),
-                ),
-                Text(DisplayFormatters.vnd(draft.amountVnd)),
-              ],
-            ),
-          ),
-        ),
+        PaymentQrCard(draft: draft),
         const SizedBox(height: 16),
         SectionCard(
           title: 'Trạng thái Bên B',

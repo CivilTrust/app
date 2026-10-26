@@ -43,6 +43,7 @@ dependencies:
   file_picker: ^13.1.0
   file_saver: ^0.7.0
   qr_flutter: ^4.1.0
+  share_plus: ^13.3.1
   web3dart: 3.0.3
 
 dev_dependencies:
@@ -55,6 +56,8 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+  image: ^4.10.2
+  zxing2: ^0.2.4
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
