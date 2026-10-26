@@ -457,6 +457,8 @@ Kế hoạch này bắt đầu ngày 25/10/2026. Một người làm phần `app
 
 **Đầu ra ngày 5:** demo được luồng A/B → PDF hash → SCT ECDSA tự kiểm trên Web; trạng thái UI trung thực và không cần blockchain để chạy ngày hôm đó.
 
+**Trạng thái triển khai app:** đã nối verifier vào bước submit và màn nhập ZIP, thêm cấu hình public signer/deployment, phân biệt `valid`/`invalid`/`unsupported`/`notConfigured`/vắng SCT. Ghi chép và đầu vào còn thiếu ở `docs/week1-completion.md`. `valid` chỉ là kiểm SCT cục bộ; chưa có xác minh Merkle/RPC hoặc SCT/deployment thật từ nhóm khác.
+
 #### 31/10–01/11: dự phòng, tích hợp fixture thật và chốt bàn giao sang tuần 2
 
 - Ưu tiên sửa lỗi giao thoa Dart/Viem, browser Web hoặc response thực; không mở thêm NFC, Drive, ảnh đính kèm hay thiết kế UI mới.

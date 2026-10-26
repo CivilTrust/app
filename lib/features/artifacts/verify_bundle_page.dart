@@ -4,12 +4,22 @@ import 'package:flutter/material.dart';
 import '../../app/flow_widgets.dart';
 import '../../core/config/app_config.dart';
 import '../../core/crypto/hash_service.dart';
+import '../notary/sct_verification_text.dart';
+import '../notary/sct_verifier.dart';
 import '../signing/mock_party_signer.dart';
 import '../signing/session_validator.dart';
 import 'artifact_service.dart';
 import 'evidence_manifest.dart';
 
-enum VerificationLevel { valid, invalid, present, unavailable, notChecked }
+enum VerificationLevel {
+  valid,
+  invalid,
+  present,
+  unavailable,
+  notChecked,
+  notConfigured,
+  unsupported,
+}
 
 class VerificationResult {
   const VerificationResult(this.label, this.detail, this.level);
@@ -41,6 +51,7 @@ class _VerifyBundlePageState extends State<VerifyBundlePage> {
     setState(() {
       busy = true;
       error = null;
+      documentHash = null;
       results = const [];
     });
     try {
@@ -53,7 +64,7 @@ class _VerifyBundlePageState extends State<VerifyBundlePage> {
       if (!mounted) return;
       setState(() {
         documentHash = manifest.documentHash;
-        results = _successResults(manifest);
+        results = verificationResultsFor(manifest, widget.config);
       });
     } catch (exception) {
       if (!mounted) return;
@@ -71,63 +82,6 @@ class _VerifyBundlePageState extends State<VerifyBundlePage> {
       if (mounted) setState(() => busy = false);
     }
   }
-
-  List<VerificationResult> _successResults(EvidenceManifest manifest) => [
-    VerificationResult(
-      'Hash PDF',
-      'Khớp agreement.pdf trong ZIP.',
-      VerificationLevel.valid,
-    ),
-    VerificationResult(
-      'Evidence ${manifest.schema}',
-      'Canonical evidence hash khớp dữ liệu phiên.',
-      VerificationLevel.valid,
-    ),
-    const VerificationResult(
-      'Chữ ký Bên A',
-      'Chữ ký Ed25519 demo trên frozen digest hợp lệ.',
-      VerificationLevel.valid,
-    ),
-    const VerificationResult(
-      'Chữ ký Bên B',
-      'Chữ ký Ed25519 demo trên cùng frozen digest hợp lệ.',
-      VerificationLevel.valid,
-    ),
-    VerificationResult(
-      'Xác nhận nhận tiền',
-      manifest.session.payment == null
-          ? 'Không có trong evidence.'
-          : 'Có xác nhận thủ công của Bên A; chưa được ngân hàng kiểm chứng.',
-      manifest.session.payment == null
-          ? VerificationLevel.unavailable
-          : VerificationLevel.present,
-    ),
-    VerificationResult(
-      'SCT Notary',
-      manifest.signedCommitment == null
-          ? 'ZIP không có SCT.'
-          : 'Có phản hồi SCT; app chưa xác minh chữ ký SCT.',
-      manifest.signedCommitment == null
-          ? VerificationLevel.unavailable
-          : VerificationLevel.notChecked,
-    ),
-    VerificationResult(
-      'Merkle proof',
-      manifest.merkleProof == null
-          ? 'Chưa có proof trong evidence.'
-          : 'Có proof nhưng client chưa thực hiện phép kiểm Merkle.',
-      manifest.merkleProof == null
-          ? VerificationLevel.unavailable
-          : VerificationLevel.notChecked,
-    ),
-    VerificationResult(
-      'Blockchain',
-      widget.config.hasRegistry
-          ? 'Đã có địa chỉ registry nhưng app chưa gọi RPC để kiểm chứng.'
-          : 'Chưa cấu hình địa chỉ registry.',
-      VerificationLevel.notChecked,
-    ),
-  ];
 
   @override
   Widget build(BuildContext context) => ListView(
@@ -185,6 +139,94 @@ class _VerifyBundlePageState extends State<VerifyBundlePage> {
   );
 }
 
+List<VerificationResult> verificationResultsFor(
+  EvidenceManifest manifest,
+  AppConfig config,
+) => [
+  VerificationResult(
+    'Hash PDF',
+    'Khớp agreement.pdf trong ZIP.',
+    VerificationLevel.valid,
+  ),
+  VerificationResult(
+    'Evidence ${manifest.schema}',
+    'Canonical evidence hash khớp dữ liệu phiên.',
+    VerificationLevel.valid,
+  ),
+  const VerificationResult(
+    'Chữ ký Bên A',
+    'Chữ ký Ed25519 demo trên frozen digest hợp lệ.',
+    VerificationLevel.valid,
+  ),
+  const VerificationResult(
+    'Chữ ký Bên B',
+    'Chữ ký Ed25519 demo trên cùng frozen digest hợp lệ.',
+    VerificationLevel.valid,
+  ),
+  VerificationResult(
+    'Xác nhận nhận tiền',
+    manifest.session.payment == null
+        ? 'Không có trong evidence.'
+        : 'Có xác nhận thủ công của Bên A; chưa được ngân hàng kiểm chứng.',
+    manifest.session.payment == null
+        ? VerificationLevel.unavailable
+        : VerificationLevel.present,
+  ),
+  sctVerificationResultFor(
+    manifest.signedCommitment,
+    documentHash: manifest.documentHash,
+    config: config,
+  ),
+  VerificationResult(
+    'Merkle proof',
+    manifest.merkleProof == null
+        ? 'Chưa có proof trong evidence.'
+        : 'Có proof nhưng client chưa thực hiện phép kiểm Merkle.',
+    manifest.merkleProof == null
+        ? VerificationLevel.unavailable
+        : VerificationLevel.notChecked,
+  ),
+  VerificationResult(
+    'Blockchain',
+    config.hasRegistry
+        ? 'Đã có địa chỉ registry nhưng app chưa gọi RPC để kiểm chứng.'
+        : 'Chưa cấu hình địa chỉ registry.',
+    config.hasRegistry
+        ? VerificationLevel.notChecked
+        : VerificationLevel.notConfigured,
+  ),
+];
+
+VerificationResult sctVerificationResultFor(
+  Object? sct, {
+  required String documentHash,
+  required AppConfig config,
+}) {
+  if (sct == null) {
+    return const VerificationResult(
+      'SCT Notary',
+      'ZIP không có SCT.',
+      VerificationLevel.unavailable,
+    );
+  }
+  final result = const SctVerifier().verifyJson(
+    sct,
+    documentHash: documentHash,
+    policy: config.sctTrustPolicy,
+  );
+  final level = switch (result.status) {
+    SctVerificationStatus.valid => VerificationLevel.valid,
+    SctVerificationStatus.invalid => VerificationLevel.invalid,
+    SctVerificationStatus.unsupported => VerificationLevel.unsupported,
+    SctVerificationStatus.notConfigured => VerificationLevel.notConfigured,
+  };
+  return VerificationResult(
+    'SCT Notary · ${sctVerificationLabel(result)}',
+    sctVerificationDetail(result),
+    level,
+  );
+}
+
 class _ResultTile extends StatelessWidget {
   const _ResultTile(this.result);
   final VerificationResult result;
@@ -216,6 +258,16 @@ class _ResultTile extends StatelessWidget {
         Icons.help_outline,
         const Color(0xffb45309),
         'Chưa kiểm tra',
+      ),
+      VerificationLevel.notConfigured => (
+        Icons.settings_outlined,
+        const Color(0xffb45309),
+        'Chưa cấu hình',
+      ),
+      VerificationLevel.unsupported => (
+        Icons.report_outlined,
+        const Color(0xffb45309),
+        'Chưa hỗ trợ',
       ),
     };
     return ListTile(

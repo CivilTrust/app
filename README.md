@@ -66,8 +66,16 @@ Compile-time values are supplied with `--dart-define`:
 | `ARBITRUM_RPC_URL`  | Arbitrum Sepolia public RPC |
 | `REGISTRY_CONTRACT` | zero address                |
 | `CHAIN_ID`          | `421614`                  |
+| `SCT_BATCH_SIGNER` | empty                     |
+| `SCT_RECEIPT_SIGNER` | empty                   |
 
-Do not put notary/relayer private keys or cluster secrets in Flutter defines.
+`SCT_BATCH_SIGNER` and `SCT_RECEIPT_SIGNER` are **public addresses** from the
+same registry deployment as `REGISTRY_CONTRACT`. Configure at least one signer
+and the correct chain/registry to let the app classify an SCT as locally valid.
+Until then it reports `chưa cấu hình` even if ECDSA recovery succeeds. A locally
+valid SCT means the PDF hash, EIP-712 domain, signature and configured signer
+match; it does not establish Merkle inclusion or on-chain registration. Do not
+put notary/relayer private keys or cluster secrets in Flutter defines.
 
 ## iOS and NFC
 
@@ -80,7 +88,7 @@ Windows can develop and test the Flutter Web/shared Dart code, but cannot build 
 - Coordinator storage is in memory; restarting it deletes sessions.
 - Invite fragments are bearer capabilities. Share them over a trusted channel and never log them.
 - Google Drive is deferred because OAuth, consent, token storage, and Drive scopes add deployment work. ZIP export/import is the portable baseline; a Drive repository can upload the exact same ZIP later.
-- The app has a pure-Dart EIP-712 SCT verifier with secp256k1 signer recovery and deployment-scoped trust policy, validated against a Viem fixture. Wiring that verifier into the UI/config, proof polling, Merkle verification, and direct RPC verification remain the next integration milestones.
+- The app locally verifies EIP-712 SCT signatures against deployment-scoped public signer addresses when configured, including during ZIP import. The test vector comes from Viem; no live testnet deployment is bundled. Proof polling, Merkle verification and direct RPC verification remain the next integration milestones.
 - The payment receipt is an explicit Party A confirmation in the final evidence, not proof from a bank API.
 
 Detailed architecture and phased work are in [plan.md](plan.md). Coordinator API details are in [coordinator/README.md](coordinator/README.md).

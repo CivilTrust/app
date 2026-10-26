@@ -14,6 +14,9 @@ import '../../core/models/identity_evidence.dart';
 import '../artifacts/artifact_service.dart';
 import '../identity/mock_identity_reader.dart';
 import '../notary/notary_client.dart';
+import '../notary/sct_verification_text.dart';
+import '../notary/sct_verifier.dart';
+import '../notary/signed_commitment_token.dart';
 import '../payment/vietqr_service.dart';
 import '../sessions/remote_session_repository.dart';
 import '../sessions/session_models.dart';
@@ -49,7 +52,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
   var confirmedReview = false;
   var identityConsent = false;
   var busy = false;
-  var notaryReceived = false;
+  SctVerificationResult? sctVerification;
   String? inviteUrl;
   String? notaryStatus;
   DateTime? expiresAt;
@@ -246,15 +249,24 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     );
     version = await repository.update(owner!, paid, version!);
     var result = await ArtifactService(hash).build(paid);
+    sctVerification = null;
+    SignedCommitmentToken? receivedSct;
     try {
-      final sct = await NotaryClient(widget.config.notaryBaseUrl)
+      receivedSct = await NotaryClient(widget.config.notaryBaseUrl)
           .submit(result.evidence.documentHash);
-      result = ArtifactService(hash).attachNotary(result, sct.toJson());
-      notaryReceived = true;
-      message = 'Đã tạo PDF và nhận phản hồi SCT. Chữ ký SCT chưa được app tự kiểm chứng.';
     } catch (error) {
-      notaryReceived = false;
       message = 'Hoàn tất offline. Notary chưa sẵn sàng: $error';
+    }
+    if (receivedSct != null) {
+      result = ArtifactService(hash).attachNotary(result, receivedSct.toJson());
+      sctVerification = const SctVerifier().verify(
+        receivedSct,
+        documentHash: result.evidence.documentHash,
+        policy: widget.config.sctTrustPolicy,
+      );
+      message =
+          'Đã tạo PDF. ${sctVerificationLabel(sctVerification!)}. '
+          '${sctVerificationDetail(sctVerification!)}';
     }
     try {
       version = await repository.finalize(owner!);
@@ -306,7 +318,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       bundle = null;
       confirmedReview = false;
       identityConsent = false;
-      notaryReceived = false;
+      sctVerification = null;
       notaryStatus = null;
       expiresAt = null;
       message = '';
@@ -751,9 +763,10 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
         ),
         const SizedBox(height: 8),
         Text(
-          notaryReceived
-              ? 'PDF cuối đã được đóng băng và đã nhận phản hồi SCT. App chưa tự xác minh chữ ký SCT hoặc Merkle proof.'
-              : 'PDF cuối đã được đóng băng. Notary chưa sẵn sàng nên ZIP hiện chưa có SCT.',
+          sctVerification == null
+              ? 'PDF cuối đã được đóng băng. ZIP hiện chưa có SCT.'
+              : 'PDF cuối đã được đóng băng. '
+                    '${sctVerificationDetail(sctVerification!)}',
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 12),
@@ -774,11 +787,17 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
             ),
             Chip(
               avatar: Icon(
-                notaryReceived ? Icons.receipt_long : Icons.cloud_off,
+                sctVerification == null
+                    ? Icons.cloud_off
+                    : sctVerification!.isValid
+                    ? Icons.verified
+                    : Icons.receipt_long,
                 size: 18,
               ),
               label: Text(
-                notaryReceived ? 'Có SCT · chưa tự xác minh' : 'Chưa có SCT',
+                sctVerification == null
+                    ? 'Chưa có SCT'
+                    : sctVerificationLabel(sctVerification!),
               ),
             ),
             Chip(

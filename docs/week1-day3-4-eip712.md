@@ -59,7 +59,7 @@ Hiện chưa có deployment Arbitrum Sepolia trong `contracts/deployments/arbitr
 3. một SCT v1.3.0 do service thật ký và một vector sai;
 4. xác nhận policy khi `sct.signer` vắng ở response idempotent `200`.
 
-Nếu các giá trị trên chưa có, UI ngày 5 phải hiện `notConfigured`, không được hiện “SCT hợp lệ” hoặc “on-chain verified”.
+Nếu các giá trị trên chưa có, UI ngày 5 phải hiện `notConfigured`, không được hiện “SCT hợp lệ” hoặc “on-chain verified”. Phần nối UI ngày 5 đã được thực hiện; xem `docs/week1-completion.md`.
 
 ## Nghiệm thu ngày 4
 
@@ -68,4 +68,4 @@ Nếu các giá trị trên chưa có, UI ngày 5 phải hiện `notConfigured`,
 - `flutter build web --no-pub`: pass; Wasm dry run của Flutter cũng thành công.
 - Đã thử `flutter test --platform chrome test/sct_verifier_test.dart`, nhưng runner của máy kiểm thử đứng ở bước `loading` hơn một phút và không chạy test case nên đã dừng. Không ghi nhận lệnh này là pass. Web build thành công xác nhận dependency compile cho Web; cần chạy lại browser test trên CI/Chrome profile hoạt động ổn định.
 - Không thay đổi PDF, coordinator, hợp đồng Solidity hoặc service.
-- Bước tiếp theo ngày 5: đưa policy vào cấu hình runtime, nối verifier vào luồng tạo ZIP và màn Kiểm chứng, vẫn giữ Merkle/RPC là “chưa kiểm”.
+- Policy và UI ngày 5 đã được nối sau biên bản này. Merkle/RPC vẫn là “chưa kiểm”.
