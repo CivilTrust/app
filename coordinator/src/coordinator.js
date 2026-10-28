@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { corsPolicy } from "./cors.js";
 import { MemorySessionStore } from './session-store.js';
+import { createWorkspaceCoordinator } from './workspace-coordinator.js';
 
 const JSON_LIMIT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
@@ -81,7 +82,7 @@ export function createCoordinator({ now = () => Date.now(), allowedOrigins = nul
     return session;
   }
 
-  return async function coordinatorHandler(request, response) {
+  const legacy = async function coordinatorHandler(request, response) {
     const policy = corsPolicy(request, allowedOrigins);
     const headers = policy.headers;
     if (!policy.allowed) {
@@ -257,4 +258,5 @@ export function createCoordinator({ now = () => Date.now(), allowedOrigins = nul
       }, headers);
     }
   };
+  return createWorkspaceCoordinator({ store: sessions, legacy, now, allowedOrigins, maxSessions });
 }

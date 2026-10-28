@@ -33,12 +33,14 @@ class SessionCapabilities {
     required this.token,
     required this.encryptionKey,
     required this.isOwner,
+    this.workflowProfile,
   });
 
   final String sessionId;
   final String token;
   final List<int> encryptionKey;
   final bool isOwner;
+  final String? workflowProfile;
 
   String toInviteFragment() {
     final value = canonicalJson({
@@ -46,6 +48,7 @@ class SessionCapabilities {
       'token': token,
       'key': base64UrlNoPadding(encryptionKey),
       'owner': isOwner,
+      if (workflowProfile != null) 'workflowProfile': workflowProfile,
     });
     return base64UrlNoPadding(value.codeUnits);
   }
@@ -58,6 +61,7 @@ class SessionCapabilities {
       token: json['token'] as String,
       encryptionKey: base64UrlDecodeNoPadding(json['key'] as String),
       isOwner: json['owner'] as bool? ?? false,
+      workflowProfile: json['workflowProfile'] as String?,
     );
   }
 }

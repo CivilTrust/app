@@ -3,6 +3,8 @@ import '../../core/models/agreement.dart';
 import '../../core/models/party_signature.dart';
 import 'party_signer.dart';
 import 'signing_context.dart';
+import '../workspace/workflow_rules.dart';
+import '../workspace/workflow_validation.dart';
 
 class SessionValidator {
   const SessionValidator(this.hash, this.signer);
@@ -14,6 +16,13 @@ class SessionValidator {
     SigningSession session, {
     bool requirePartyB = false,
   }) async {
+    if (session.draft.fields.containsKey('workflowProfile')) {
+      if (!WorkflowRules.supports(session.draft)) {
+        throw const FormatException('Workflow profile không được hỗ trợ.');
+      }
+      await validateWorkflow(session, hash, signer, requireBoth: requirePartyB);
+      return;
+    }
     final isV2 =
         session.draft.fields['signingProtocol'] == SigningContext.protocol;
     if (session.draft.fields.containsKey('signingProtocol') && !isV2) {
