@@ -10,6 +10,7 @@ enum AgreementState {
   finalized,
   committedPendingAnchor,
   batched,
+  bothSigned,
 }
 
 class AgreementDraft {
@@ -86,6 +87,7 @@ class SigningSession {
     this.partyA,
     this.partyB,
     this.payment,
+    this.events = const [],
   });
 
   factory SigningSession.fromJson(Map<String, dynamic> json) => SigningSession(
@@ -109,6 +111,9 @@ class SigningSession {
         : PaymentReceipt.fromJson(
             Map<String, dynamic>.from(json['payment'] as Map),
           ),
+    events: (json['events'] as List? ?? [])
+        .map((event) => Map<String, dynamic>.from(event as Map))
+        .toList(),
   );
 
   final AgreementDraft draft;
@@ -117,6 +122,7 @@ class SigningSession {
   final PartySignature? partyA;
   final PartySignature? partyB;
   final PaymentReceipt? payment;
+  final List<Map<String, dynamic>> events;
 
   SigningSession copyWith({
     AgreementState? state,
@@ -124,6 +130,7 @@ class SigningSession {
     PartySignature? partyA,
     PartySignature? partyB,
     PaymentReceipt? payment,
+    List<Map<String, dynamic>>? events,
   }) => SigningSession(
     draft: draft,
     state: state ?? this.state,
@@ -131,6 +138,7 @@ class SigningSession {
     partyA: partyA ?? this.partyA,
     partyB: partyB ?? this.partyB,
     payment: payment ?? this.payment,
+    events: events ?? this.events,
   );
 
   Map<String, Object?> toJson() => {
@@ -140,5 +148,6 @@ class SigningSession {
     'partyA': partyA?.toJson(),
     'partyB': partyB?.toJson(),
     'payment': payment?.toJson(),
+    if (events.isNotEmpty) 'events': events,
   };
 }
