@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../core/config/app_config.dart';
 import '../../core/config/environment_check.dart';
 import '../../app/flow_widgets.dart';
 import 'connectivity_service.dart';
 import '../payment/vietqr_preview_page.dart';
+import '../identity/nfc_readiness_page.dart';
 
 class EnvironmentPage extends StatefulWidget {
   const EnvironmentPage({
@@ -38,6 +40,7 @@ class _EnvironmentPageState extends State<EnvironmentPage> {
     final checked = await service.check(
       widget.config,
       widget.pageUri ?? Uri.base,
+      isWeb: widget.pageUri != null || kIsWeb,
     );
     if (!mounted) return;
     setState(() {
@@ -49,7 +52,11 @@ class _EnvironmentPageState extends State<EnvironmentPage> {
   @override
   Widget build(BuildContext context) {
     final config = widget.config;
-    final issues = checkEnvironment(config, widget.pageUri ?? Uri.base);
+    final issues = checkEnvironment(
+      config,
+      widget.pageUri ?? Uri.base,
+      isWeb: widget.pageUri != null || kIsWeb,
+    );
     return ListView(
       padding: const EdgeInsets.all(24),
       children: [
@@ -112,11 +119,21 @@ class _EnvironmentPageState extends State<EnvironmentPage> {
           label: const Text('Thử VietQR cục bộ'),
         ),
         const SizedBox(height: 16),
+        OutlinedButton.icon(
+          onPressed: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) => NfcReadinessPage(mode: config.identityMode),
+            ),
+          ),
+          icon: const Icon(Icons.nfc),
+          label: const Text('Kiểm tra NFC readiness'),
+        ),
+        const SizedBox(height: 16),
         const TrustNotice(
           title: 'NFC chưa sẵn sàng',
           message:
               'Bản hiện tại dùng CCCD mock. Safari không chạy adapter Core NFC của app iOS. '
-              'Đọc chip thật còn cần Mac/Xcode, app iOS đã ký, giao thức/SDK CCCD, AID và trust anchor. '
+              'Đọc chip thật còn cần môi trường macOS/Xcode (có thể dùng CI), app iOS đã ký, giao thức/SDK CCCD, AID và trust anchor. '
               'Chưa đưa dữ liệu CCCD thật vào bản demo.',
         ),
         const SizedBox(height: 16),

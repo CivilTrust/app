@@ -7,6 +7,8 @@ class PartySignature {
     required this.signature,
     required this.signedAt,
     required this.identity,
+    this.schemaVersion = 1,
+    this.envelope,
   });
 
   factory PartySignature.fromJson(Map<String, dynamic> json) => PartySignature(
@@ -17,6 +19,10 @@ class PartySignature {
     signature: json['signature'] as String,
     signedAt: DateTime.parse(json['signedAt'] as String),
     identity: Map<String, dynamic>.from(json['identity'] as Map),
+    schemaVersion: json['schemaVersion'] as int? ?? 1,
+    envelope: json['envelope'] == null
+        ? null
+        : Map<String, dynamic>.from(json['envelope'] as Map),
   );
 
   final String role;
@@ -26,6 +32,8 @@ class PartySignature {
   final String signature;
   final DateTime signedAt;
   final Map<String, dynamic> identity;
+  final int schemaVersion;
+  final Map<String, dynamic>? envelope;
 
   Map<String, Object?> toJson() => {
     'role': role,
@@ -35,5 +43,9 @@ class PartySignature {
     'signature': signature,
     'signedAt': signedAt.toUtc().toIso8601String(),
     'identity': identity,
+    if (schemaVersion != 1 || envelope != null) ...{
+      'schemaVersion': schemaVersion,
+      'envelope': envelope,
+    },
   };
 }

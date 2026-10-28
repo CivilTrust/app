@@ -6,7 +6,11 @@ class EnvironmentIssue {
   final String message;
 }
 
-List<EnvironmentIssue> checkEnvironment(AppConfig config, Uri pageUri) {
+List<EnvironmentIssue> checkEnvironment(
+  AppConfig config,
+  Uri pageUri, {
+  bool isWeb = true,
+}) {
   final issues = <EnvironmentIssue>[];
   if (!{'local', 'staging'}.contains(config.environment)) {
     issues.add(
@@ -17,7 +21,9 @@ List<EnvironmentIssue> checkEnvironment(AppConfig config, Uri pageUri) {
     );
   }
   final staging = config.environment == 'staging';
-  if (staging && (pageUri.scheme != 'https' || isLoopback(pageUri.host))) {
+  if (isWeb &&
+      staging &&
+      (pageUri.scheme != 'https' || isLoopback(pageUri.host))) {
     issues.add(
       const EnvironmentIssue(
         'Trang Web',
@@ -54,14 +60,15 @@ List<EnvironmentIssue> checkEnvironment(AppConfig config, Uri pageUri) {
           'Staging cần HTTPS và địa chỉ không trỏ về localhost của điện thoại.',
         ),
       );
-    } else if (pageUri.scheme == 'https' && uri.scheme != 'https') {
+    } else if (isWeb && pageUri.scheme == 'https' && uri.scheme != 'https') {
       issues.add(
         EnvironmentIssue(
           endpoint.$1,
           'Trang HTTPS không được gọi endpoint HTTP (mixed content).',
         ),
       );
-    } else if ({'http', 'https'}.contains(pageUri.scheme) &&
+    } else if (isWeb &&
+        {'http', 'https'}.contains(pageUri.scheme) &&
         !isLoopback(pageUri.host) &&
         isLoopback(uri.host)) {
       issues.add(

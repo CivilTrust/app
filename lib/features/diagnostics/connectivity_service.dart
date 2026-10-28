@@ -24,8 +24,12 @@ class ConnectivityService {
   final Duration timeout;
   void close() => _client.close();
 
-  Future<List<ConnectionResult>> check(AppConfig config, Uri pageUri) async {
-    final issues = checkEnvironment(config, pageUri);
+  Future<List<ConnectionResult>> check(
+    AppConfig config,
+    Uri pageUri, {
+    bool isWeb = true,
+  }) async {
+    final issues = checkEnvironment(config, pageUri, isWeb: isWeb);
     return Future.wait([
       _probe(
         'Coordinator',

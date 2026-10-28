@@ -9,10 +9,31 @@ abstract interface class IdentityReader {
 }
 
 class IdentityReaderException implements Exception {
-  const IdentityReaderException(this.message);
+  const IdentityReaderException(
+    this.message, {
+    this.code = IdentityErrorCode.authenticationFailed,
+  });
 
   final String message;
+  final IdentityErrorCode code;
 
   @override
   String toString() => message;
+}
+
+enum IdentityErrorCode {
+  unsupported,
+  misconfigured,
+  consentRequired,
+  cancelled,
+  timeout,
+  tagLost,
+  multipleTags,
+  unsupportedCard,
+  accessDenied,
+  authenticationFailed,
+  verifierUnavailable,
+  busy,
+  expired,
+  replay,
 }

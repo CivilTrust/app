@@ -13,7 +13,8 @@ class IosIdentityReader implements IdentityReader {
   @override
   Future<IdentityEvidence> read({required String role}) {
     throw const IdentityReaderException(
-      'Core NFC CCCD adapter chưa được cấu hình. Hãy dùng chế độ mock.',
+      'Core NFC CCCD adapter chưa được cấu hình. Không đọc CCCD thật hoặc tự chuyển sang mock.',
+      code: IdentityErrorCode.misconfigured,
     );
   }
 

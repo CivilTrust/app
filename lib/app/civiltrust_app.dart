@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../core/config/app_config.dart';
 import '../core/config/environment_check.dart';
@@ -72,7 +73,7 @@ class _CivilTrustHomeState extends State<CivilTrustHome> {
 
   @override
   Widget build(BuildContext context) {
-    final blocksSession = checkEnvironment(config, Uri.base).any(
+    final blocksSession = checkEnvironment(config, Uri.base, isWeb: kIsWeb).any(
       (issue) =>
           {'Coordinator', 'Trang Web', 'Môi trường'}.contains(issue.target),
     );

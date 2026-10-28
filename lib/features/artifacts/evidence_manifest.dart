@@ -11,8 +11,8 @@ class EvidenceManifest {
   });
 
   factory EvidenceManifest.fromJson(Map<String, dynamic> json) {
-    final schema = json['schema'] as String? ?? currentSchema;
-    if (schema != currentSchema) {
+    final schema = json['schema'] as String? ?? legacySchema;
+    if (schema != currentSchema && schema != legacySchema) {
       throw FormatException('Phiên bản evidence không được hỗ trợ: $schema');
     }
     return EvidenceManifest(
@@ -29,7 +29,8 @@ class EvidenceManifest {
     );
   }
 
-  static const currentSchema = 'civiltrust-evidence/1.0';
+  static const legacySchema = 'civiltrust-evidence/1.0';
+  static const currentSchema = 'civiltrust-evidence/2.0';
 
   final String schema;
   final String documentHash;

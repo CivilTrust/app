@@ -153,15 +153,24 @@ List<VerificationResult> verificationResultsFor(
     'Canonical evidence hash khớp dữ liệu phiên.',
     VerificationLevel.valid,
   ),
-  const VerificationResult(
+  VerificationResult(
     'Chữ ký Bên A',
-    'Chữ ký Ed25519 demo trên frozen digest hợp lệ.',
+    manifest.session.partyA?.schemaVersion == 2
+        ? 'Chữ ký demo v2 ràng buộc draft, vai trò và danh tính mô phỏng; không xác thực CCCD thật.'
+        : 'Chữ ký demo v1 trên draft; identity đính kèm chưa được ràng buộc mật mã.',
+    VerificationLevel.valid,
+  ),
+  VerificationResult(
+    'Chữ ký Bên B',
+    manifest.session.partyB?.schemaVersion == 2
+        ? 'Chữ ký demo v2 ràng buộc draft, vai trò và danh tính mô phỏng; không xác thực CCCD thật.'
+        : 'Chữ ký demo v1 trên draft; identity đính kèm chưa được ràng buộc mật mã.',
     VerificationLevel.valid,
   ),
   const VerificationResult(
-    'Chữ ký Bên B',
-    'Chữ ký Ed25519 demo trên cùng frozen digest hợp lệ.',
-    VerificationLevel.valid,
+    'Xác thực CCCD / chủ thẻ',
+    'Chưa tích hợp verifier CCCD. Kiểm chữ ký demo không chứng minh chip hoặc chủ thẻ thật; offline không kiểm được challenge đã dùng trên toàn hệ thống.',
+    VerificationLevel.notConfigured,
   ),
   VerificationResult(
     'Xác nhận nhận tiền',

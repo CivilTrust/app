@@ -1,5 +1,6 @@
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/flow_widgets.dart';
@@ -12,7 +13,8 @@ import '../../core/ids/agreement_id.dart';
 import '../../core/models/agreement.dart';
 import '../../core/models/identity_evidence.dart';
 import '../artifacts/artifact_service.dart';
-import '../identity/mock_identity_reader.dart';
+import '../identity/identity_service.dart';
+import '../identity/identity_context.dart';
 import '../notary/notary_client.dart';
 import '../notary/sct_verification_text.dart';
 import '../notary/sct_verifier.dart';
@@ -24,23 +26,33 @@ import '../sessions/invite_url.dart';
 import '../sessions/session_models.dart';
 import '../signing/mock_party_signer.dart';
 import '../signing/session_validator.dart';
+import '../signing/signing_context.dart';
 import 'contract_template.dart';
 import 'contract_template_service.dart';
 import 'agreement_validator.dart';
 
 class CreateAgreementPage extends StatefulWidget {
-  const CreateAgreementPage({required this.config, super.key});
+  const CreateAgreementPage({
+    required this.config,
+    this.identityService,
+    super.key,
+  });
   final AppConfig config;
+  final IdentityService? identityService;
 
   @override
   State<CreateAgreementPage> createState() => _CreateAgreementPageState();
 }
 
-class _CreateAgreementPageState extends State<CreateAgreementPage> {
+class _CreateAgreementPageState extends State<CreateAgreementPage>
+    with WidgetsBindingObserver {
   final templateService = ContractTemplateService();
   final hash = const HashService();
   final signer = MockPartySigner();
-  final identityReader = MockIdentityReader();
+  late final identityService =
+      widget.identityService ??
+      IdentityService.forMode(widget.config.identityMode);
+  String ceremonyId = createIdentityNonce();
   final validator = const AgreementValidator();
   final controllers = <String, TextEditingController>{};
   final formKey = GlobalKey<FormState>();
@@ -60,6 +72,27 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
   String? notaryStatus;
   DateTime? expiresAt;
   String message = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) identityService.cancel();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    identityService.dispose();
+    for (final controller in controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
 
   RemoteSessionRepository get repository =>
       RemoteSessionRepository(widget.config.coordinatorBaseUrl);
@@ -82,15 +115,19 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       reviewDraft = null;
       stage = 1;
       identityConsent = false;
+      identityA = null;
+      ceremonyId = createIdentityNonce();
       message = '';
     });
   }
 
   Future<void> readIdentity() => _run(() async {
-    if (!identityConsent) {
-      throw StateError('Bạn phải đồng ý đọc dữ liệu CCCD mô phỏng.');
-    }
-    identityA = await identityReader.read(role: 'partyA');
+    final evidence = await identityService.identify(
+      context: IdentityContext.create(ceremonyId: ceremonyId, role: 'partyA'),
+      consent: identityConsent,
+    );
+    if (!mounted) return;
+    identityA = evidence;
     controllers['accountName']!.text = identityA!.displayName;
     stage = 2;
     message = 'Đã điền thông tin Bên A từ CCCD mock.';
@@ -138,6 +175,8 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       ...fields,
       'paymentQrProfile': PaymentDetails.profile,
       'paymentPurpose': PaymentDetails.purposeFor(draftId),
+      'signingProtocol': SigningContext.protocol,
+      'identityCeremonyId': ceremonyId,
     };
     final reviewed = AgreementDraft(
       id: draftId,
@@ -177,6 +216,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       role: 'partyA',
       digest: hexToBytes(digest),
       identity: identityA!,
+      context: SigningContext.fromDraft(draft),
     );
     final initial = SigningSession(
       draft: draft,
@@ -190,7 +230,10 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     version = created.version;
     expiresAt = created.expiresAt;
     final fragment = created.participant.toInviteFragment();
-    inviteUrl = buildInviteUrl(Uri.base, fragment);
+    // Native v1 intake uses an opaque paste code, not a bogus file:// invite.
+    inviteUrl = {'http', 'https'}.contains(Uri.base.scheme)
+        ? buildInviteUrl(Uri.base, fragment)
+        : 'join=$fragment';
     stage = 4;
     message = 'Đã khóa nội dung. Gửi link cho Bên B để xác minh và ký.';
   });
@@ -320,7 +363,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
 
   void _checkNotaryConfiguration() {
     if (!widget.config.notaryEnabled ||
-        checkEnvironment(widget.config, Uri.base).any(
+        checkEnvironment(widget.config, Uri.base, isWeb: kIsWeb).any(
           (issue) =>
               {'Notary', 'Trang Web', 'Môi trường'}.contains(issue.target),
         )) {
@@ -331,6 +374,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
   }
 
   Future<void> _run(Future<void> Function() operation) async {
+    if (busy) return;
     setState(() => busy = true);
     try {
       await operation();
@@ -346,6 +390,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       selectedTemplate = null;
       reviewDraft = null;
       identityA = null;
+      ceremonyId = createIdentityNonce();
       session = null;
       owner = null;
       version = null;
@@ -430,11 +475,11 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const TrustNotice(
-          title: 'Đang sử dụng dữ liệu mô phỏng',
-          message:
-              'Bước này kiểm thử luồng tự điền và không đọc chip CCCD thật. '
-              'Không sử dụng dữ liệu này như bằng chứng định danh ngoài đời.',
+        TrustNotice(
+          title: identityService.isMock
+              ? 'Đang sử dụng dữ liệu mô phỏng'
+              : 'NFC chưa sẵn sàng',
+          message: identityService.notice,
         ),
         const SizedBox(height: 12),
         CheckboxListTile(
@@ -442,8 +487,10 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
           value: identityConsent,
           onChanged: (value) =>
               setState(() => identityConsent = value ?? false),
-          title: const Text(
-            'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo',
+          title: Text(
+            identityService.isMock
+                ? 'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo'
+                : 'Tôi đồng ý bắt đầu kiểm tra khả năng NFC (chưa đọc CCCD thật)',
           ),
           subtitle: const Text(
             'Consent này tách biệt với việc đồng ý nội dung hợp đồng.',
@@ -454,8 +501,17 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
         FilledButton.icon(
           onPressed: busy || !identityConsent ? null : readIdentity,
           icon: const Icon(Icons.nfc),
-          label: const Text('Quét CCCD mock của Bên A'),
+          label: Text(
+            identityService.isMock
+                ? 'Quét CCCD mock của Bên A'
+                : 'Kiểm tra NFC Bên A',
+          ),
         ),
+        if (busy)
+          TextButton(
+            onPressed: identityService.cancel,
+            child: const Text('Hủy đọc danh tính'),
+          ),
         TextButton(
           onPressed: () => setState(() => stage = 0),
           child: const Text('Chọn lại mẫu'),
@@ -623,7 +679,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
       const TrustNotice(
         title: 'Phạm vi chữ ký',
         message:
-            'Hai bên ký digest của nội dung bên trên. Xác nhận nhận tiền và PDF cuối '
+            'Chữ ký demo v2 ràng buộc nội dung, vai trò và danh tính mô phỏng; không xác thực CCCD thật. Xác nhận nhận tiền và PDF cuối '
             'được tạo sau đó, được ghi thành bằng chứng riêng trong hồ sơ.',
       ),
       const SizedBox(height: 8),
@@ -658,6 +714,19 @@ class _CreateAgreementPageState extends State<CreateAgreementPage> {
             ),
           ),
         ],
+      ),
+      TextButton(
+        onPressed: busy
+            ? null
+            : () => setState(() {
+                identityA = null;
+                reviewDraft = null;
+                confirmedReview = false;
+                identityConsent = false;
+                ceremonyId = createIdentityNonce();
+                stage = 1;
+              }),
+        child: const Text('Đọc lại danh tính / làm mới challenge'),
       ),
     ],
   );

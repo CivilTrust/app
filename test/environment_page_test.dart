@@ -35,6 +35,11 @@ void main() {
           ),
         ),
       );
+      await tester.scrollUntilVisible(
+        find.text('NFC chưa sẵn sàng'),
+        150,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('NFC chưa sẵn sàng'), findsOneWidget);
       expect(find.textContaining('private-capability'), findsNothing);
       await tester.ensureVisible(find.text('Kiểm tra kết nối'));

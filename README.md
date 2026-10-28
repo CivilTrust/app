@@ -1,12 +1,18 @@
 # CivilTrust MVP
 
+## NFC readiness (G0/G1)
+
+See [NFC G0/G1 acceptance](docs/nfc-g0-g1-acceptance.md) for implemented bindings, tests and external blockers. Run `./nfc-preflight.ps1` for a read-only inventory. In the app open **Thông tin → Kiểm tra NFC readiness**. `IDENTITY_MODE` accepts `mock` (default), `native-lab`, or `verified-native`; native modes fail closed until a real SDK/verifier is integrated and never fall back to mock. No real CCCD should be used in this release.
+
+New agreements use demo signing envelopes v2 and evidence ZIP v2; legacy v1 remains readable with an identity-unbound warning. A valid demo signature is not CCCD or cardholder authentication. The manual iOS preflight workflow is unsigned compilation only, not a device-installable build or NFC acceptance; it has not been run. Both parties must use the updated app for v2 agreements.
+
 Flutter Web/iOS client and a small encrypted coordinator for a two-party remote electronic-agreement demo. The implementation is isolated in `app/`; it does not modify `contracts/` or `service/`.
 
 ## What works
 
-- Party A selects a deposit or loan template, consents to mock CCCD data, completes validated terms, freezes the agreement, and signs its canonical digest.
+- Party A selects a deposit or loan template, consents to mock CCCD data, completes validated terms, freezes the agreement, and signs a v2 envelope binding its canonical digest, role and mock identity.
 - The client encrypts the signing session with AES-256-GCM and uploads only the envelope to the coordinator.
-- Party B opens a capability invite on another browser/device, verifies A, reads mock CCCD, and signs the same digest.
+- Party B opens a capability invite on another browser/device, verifies A, reads mock CCCD, and signs its own v2 envelope referencing the same frozen draft digest.
 - For the current MVP payment direction, Party B transfers to Party A: B is the depositor for a deposit agreement or the lender for a loan agreement. Party A checks the real banking app before confirming receipt.
 - A/B share the same offline VietQR account-transfer profile, with PNG download/share and copyable payment details for a single-phone flow. New payment references are reviewed and signed in the draft; existing sessions keep their old reference. The **Thông tin → Thử VietQR cục bộ** tool generates a preview locally without creating a session or sending account details to coordinator/notary.
 - Party A verifies the returned session, records a manual payment receipt confirmation, generates immutable `agreement.pdf`, hashes it with Keccak-256, calls the existing notary service, and finalizes the coordinator session.

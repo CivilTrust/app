@@ -1,4 +1,5 @@
 import '../../features/notary/sct_verifier.dart';
+import '../../features/identity/identity_service.dart';
 
 class AppConfig {
   const AppConfig({
@@ -11,6 +12,7 @@ class AppConfig {
     this.receiptSigner = '',
     this.environment = 'local',
     this.notaryEnabled = true,
+    this.identityMode = IdentityMode.mock,
   });
 
   factory AppConfig.fromEnvironment({Uri? pageUri}) => AppConfig(
@@ -44,6 +46,9 @@ class AppConfig {
       'NOTARY_ENABLED',
       defaultValue: true,
     ),
+    identityMode: IdentityMode.parse(
+      const String.fromEnvironment('IDENTITY_MODE', defaultValue: 'mock'),
+    ),
   );
 
   final String coordinatorBaseUrl;
@@ -55,6 +60,7 @@ class AppConfig {
   final String receiptSigner;
   final String environment;
   final bool notaryEnabled;
+  final IdentityMode identityMode;
 
   /// Only root-relative endpoints are supported. Never inherit an invite's
   /// query or fragment when constructing a network endpoint.

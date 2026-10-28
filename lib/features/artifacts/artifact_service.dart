@@ -40,12 +40,28 @@ class ArtifactService {
         session.payment == null) {
       throw StateError('Cần đủ hai chữ ký và xác nhận thanh toán.');
     }
+    // G1 permits synthetic demo data only. A real identity export needs a
+    // reviewed privacy/proof policy and is intentionally blocked until G4.
+    for (final signature in [session.partyA!, session.partyB!]) {
+      if (signature.identity['source'] != 'mock' ||
+          signature.identity['chipAuthentication'] != 'mock' ||
+          signature.identity['proof'] != null ||
+          (signature.identity['schemaVersion'] == 2 &&
+              signature.identity['assurance'] != 'mock')) {
+        throw StateError('G1 không cho xuất danh tính CCCD thật ra PDF/ZIP.');
+      }
+    }
     final evidenceHash = _hash.keccakHex(
       utf8.encode(canonicalJson(session.toJson())),
     );
     final pdf = await _buildPdf(session, evidenceHash);
     final documentHash = _hash.keccakHex(pdf);
     final evidence = EvidenceManifest(
+      schema:
+          session.partyA!.schemaVersion == 2 &&
+              session.partyB!.schemaVersion == 2
+          ? EvidenceManifest.currentSchema
+          : EvidenceManifest.legacySchema,
       documentHash: documentHash,
       evidenceHash: evidenceHash,
       session: session.copyWith(state: AgreementState.committedPendingAnchor),
@@ -65,6 +81,7 @@ class ArtifactService {
 
   ArtifactBundle attachNotary(ArtifactBundle bundle, Map<String, dynamic> sct) {
     final evidence = EvidenceManifest(
+      schema: bundle.evidence.schema,
       documentHash: bundle.evidence.documentHash,
       evidenceHash: bundle.evidence.evidenceHash,
       session: bundle.evidence.session,

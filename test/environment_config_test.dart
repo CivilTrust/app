@@ -22,6 +22,24 @@ AppConfig staging({
 );
 
 void main() {
+  test(
+    'native staging validates endpoints without requiring a browser origin',
+    () {
+      final issues = checkEnvironment(
+        staging(),
+        Uri.parse('file:///native-app'),
+        isWeb: false,
+      );
+      expect(issues.where((e) => e.target == 'Trang Web'), isEmpty);
+      expect(
+        checkEnvironment(
+          staging(),
+          Uri.parse('file:///native-app'),
+        ).where((e) => e.target == 'Trang Web'),
+        isNotEmpty,
+      );
+    },
+  );
   final page = Uri.parse(
     'https://demo.test/?tracking=discard#join=private-capability',
   );

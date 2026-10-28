@@ -7,23 +7,36 @@ import '../../core/encoding/encoding_utils.dart';
 import '../../core/formatting/display_formatters.dart';
 import '../../core/models/agreement.dart';
 import '../../core/models/identity_evidence.dart';
-import '../identity/mock_identity_reader.dart';
+import '../identity/identity_service.dart';
+import '../identity/identity_context.dart';
 import '../payment/payment_qr_card.dart';
 import '../payment/payment_details.dart';
 import '../sessions/remote_session_repository.dart';
 import '../sessions/session_models.dart';
+import '../sessions/invite_url.dart';
 import '../signing/mock_party_signer.dart';
 import '../signing/session_validator.dart';
+import '../signing/signing_context.dart';
 
 class JoinAgreementPage extends StatefulWidget {
-  const JoinAgreementPage({required this.config, super.key});
+  const JoinAgreementPage({
+    required this.config,
+    this.identityService,
+    super.key,
+  });
   final AppConfig config;
+  final IdentityService? identityService;
 
   @override
   State<JoinAgreementPage> createState() => _JoinAgreementPageState();
 }
 
-class _JoinAgreementPageState extends State<JoinAgreementPage> {
+class _JoinAgreementPageState extends State<JoinAgreementPage>
+    with WidgetsBindingObserver {
+  late final identityService =
+      widget.identityService ??
+      IdentityService.forMode(widget.config.identityMode);
+  final signer = MockPartySigner();
   final inviteController = TextEditingController();
   SessionCapabilities? capability;
   SigningSession? session;
@@ -42,23 +55,38 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     final fragment = Uri.base.fragment;
     if (fragment.startsWith('join=')) {
       inviteController.text = fragment.substring(5);
     }
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) identityService.cancel();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    identityService.dispose();
+    inviteController.dispose();
+    super.dispose();
+  }
+
   Future<void> open() => _run(() async {
-    var value = inviteController.text.trim();
-    if (value.isEmpty) throw const FormatException('Hãy dán link hoặc mã mời.');
-    if (value.contains('#join=')) value = value.split('#join=').last;
-    capability = SessionCapabilities.fromInviteFragment(value);
-    final snapshot = await repository.read(capability!);
+    final opened = parseParticipantInvite(inviteController.text);
+    final snapshot = await repository.read(opened);
     await SessionValidator(
       const HashService(),
       MockPartySigner(),
     ).validate(snapshot.value);
+    capability = opened;
     session = snapshot.value;
+    identityB = null;
+    identityConsent = false;
+    accepted = false;
     version = snapshot.version;
     expiresAt = snapshot.expiresAt;
     if (snapshot.value.payment != null) {
@@ -78,10 +106,16 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
 
   Future<void> identify() => _run(() async {
     PaymentDetails.fromDraft(session!.draft);
-    if (!identityConsent) {
-      throw StateError('Bạn phải đồng ý đọc dữ liệu CCCD mô phỏng.');
-    }
-    identityB = await MockIdentityReader().read(role: 'partyB');
+    final context = SigningContext.fromDraft(session!.draft);
+    final evidence = await identityService.identify(
+      context: IdentityContext.create(
+        ceremonyId: context.ceremonyId,
+        role: 'partyB',
+      ),
+      consent: identityConsent,
+    );
+    if (!mounted) return;
+    identityB = evidence;
     step = 2;
     message = 'Đã điền thông tin Bên B từ CCCD mock.';
   });
@@ -91,10 +125,11 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
     if (!accepted) {
       throw StateError('Bạn phải xác nhận đã đọc và đồng ý.');
     }
-    final signature = await MockPartySigner().sign(
+    final signature = await signer.sign(
       role: 'partyB',
       digest: hexToBytes(session!.frozenDigest!),
       identity: identityB!,
+      context: SigningContext.fromDraft(session!.draft),
     );
     final updated = session!.copyWith(
       state: AgreementState.partyBSigned,
@@ -130,6 +165,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
   });
 
   Future<void> _run(Future<void> Function() operation) async {
+    if (busy) return;
     setState(() => busy = true);
     try {
       await operation();
@@ -267,9 +303,10 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
                   'Phiên hết hạn: ${DisplayFormatters.dateTime(expiresAt!)}',
                 ),
               const SizedBox(height: 10),
-              const TrustNotice(
+              TrustNotice(
                 title: 'Chữ ký demo',
-                message: 'Bạn sẽ ký digest nội dung bằng khóa Ed25519 tạm thời. Đây chưa phải chữ ký số được chứng nhận.',
+                message:
+                    '${identityService.notice} Chữ ký demo v2 ràng buộc danh tính mô phỏng với nội dung; chưa phải chữ ký số được chứng nhận.',
               ),
               const SizedBox(height: 10),
               CheckboxListTile(
@@ -277,8 +314,10 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
                 value: identityConsent,
                 onChanged: (value) =>
                     setState(() => identityConsent = value ?? false),
-                title: const Text(
-                  'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo',
+                title: Text(
+                  identityService.isMock
+                      ? 'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo'
+                      : 'Tôi đồng ý bắt đầu kiểm tra khả năng NFC (chưa đọc CCCD thật)',
                 ),
                 subtitle: const Text(
                   'Consent này không đồng nghĩa đồng ý nội dung hợp đồng.',
@@ -292,11 +331,18 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
         SizedBox(
           width: double.infinity,
           child: FilledButton.icon(
-            onPressed: identityConsent && payment != null ? identify : null,
+            onPressed: !busy && identityConsent && payment != null
+                ? identify
+                : null,
             icon: const Icon(Icons.nfc),
             label: const Text('Tôi đã đọc · Xác minh CCCD Bên B'),
           ),
         ),
+        if (busy)
+          TextButton(
+            onPressed: identityService.cancel,
+            child: const Text('Hủy đọc danh tính'),
+          ),
       ],
     );
   }
@@ -323,7 +369,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
           'Tôi xác nhận thông tin đúng, đã đọc và đồng ý toàn bộ hợp đồng.',
         ),
         subtitle: const Text(
-          'Chữ ký được tạo trên đúng digest mà Bên A đã ký.',
+          'Chữ ký demo v2 ràng buộc danh tính B với đúng nội dung và vai trò; chưa xác thực CCCD thật.',
         ),
         controlAffinity: ListTileControlAffinity.leading,
       ),
@@ -334,6 +380,17 @@ class _JoinAgreementPageState extends State<JoinAgreementPage> {
           icon: const Icon(Icons.draw),
           label: const Text('Đồng ý và ký hợp đồng'),
         ),
+      ),
+      TextButton(
+        onPressed: busy
+            ? null
+            : () => setState(() {
+                identityB = null;
+                accepted = false;
+                identityConsent = false;
+                step = 1;
+              }),
+        child: const Text('Đọc lại danh tính / làm mới challenge'),
       ),
     ],
   );
