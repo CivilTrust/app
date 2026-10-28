@@ -10,6 +10,8 @@ Flutter Web/iOS client and a small encrypted coordinator for a two-party remote 
 
 ## What works
 
+The default UI now uses the role-independent workspace described in [workspace acceptance](docs/workspace-acceptance.md): either A or B creates a proposal, A confirms bank instructions, the creator signs first, then the counterparty signs. B reports transfer; A alone confirms receipt and publishes the immutable ZIP for both parties. **Hồ sơ** provides encrypted local drafts/history and recovery export/import without accounts. Close/reopen requires the same origin and vault password, or an encrypted backup on another device. The sections describing the original A-first flow below remain relevant to legacy sessions only.
+
 - Party A selects a deposit or loan template, consents to mock CCCD data, completes validated terms, freezes the agreement, and signs a v2 envelope binding its canonical digest, role and mock identity.
 - The client encrypts the signing session with AES-256-GCM and uploads only the envelope to the coordinator.
 - Party B opens a capability invite on another browser/device, verifies A, reads mock CCCD, and signs its own v2 envelope referencing the same frozen draft digest.
@@ -23,7 +25,7 @@ Mock signatures use ephemeral Ed25519 keys and are demo evidence only. The `Iden
 
 ## Run on Windows
 
-Install Flutter, Node.js 20+, and start the coordinator:
+Install Flutter, Node.js 24+, and start the coordinator:
 
 ```powershell
 cd app\coordinator
@@ -106,7 +108,7 @@ Windows can develop and test the Flutter Web/shared Dart code, but cannot build 
 
 ## Deliberate MVP limits
 
-- Coordinator storage is in memory; restarting it deletes sessions.
+- The server/demo persists encrypted sessions and token hashes in SQLite (`.demo/coordinator.sqlite`). Keep the database across restarts and back it up; active workflow sessions expire after 7 days, finalized downloads after 30 days. This is not permanent production hosting.
 - Invite fragments are bearer capabilities. Share them over a trusted channel and never log them.
 - Google Drive is deferred because OAuth, consent, token storage, and Drive scopes add deployment work. ZIP export/import is the portable baseline; a Drive repository can upload the exact same ZIP later.
 - The app locally verifies EIP-712 SCT signatures against deployment-scoped public signer addresses when configured, including during ZIP import. The test vector comes from Viem; no live testnet deployment is bundled. Proof polling, Merkle verification and direct RPC verification remain the next integration milestones.

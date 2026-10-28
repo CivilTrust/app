@@ -139,7 +139,7 @@ class _EnvironmentPageState extends State<EnvironmentPage> {
         const SizedBox(height: 16),
         const Text(
           'Kết quả này chỉ kiểm health và cấu hình mạng, không xác nhận đã ký, đã nhận tiền hoặc đã neo blockchain. '
-          'Coordinator lưu trong bộ nhớ; khởi động lại sẽ mất phiên. Không chia sẻ link mời trong log hoặc ảnh chụp.',
+          'Server demo lưu ciphertext trong SQLite local; phải giữ database và lưu ý thời hạn phiên. Kho trên thiết bị cần mật khẩu và backup riêng. Không chia sẻ link mời trong log hoặc ảnh chụp.',
         ),
       ],
     );

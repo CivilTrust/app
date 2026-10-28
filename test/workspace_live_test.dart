@@ -18,6 +18,41 @@ import 'package:civiltrust_app/core/crypto/hash_service.dart';
 import 'package:civiltrust_app/features/workspace/workspace_artifacts.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
+class LostPublishResponseClient extends http.BaseClient {
+  final real = http.Client();
+  bool dropNextPublish = false, dropNextCreate = false;
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final createDrop =
+        dropNextCreate &&
+        request.method == 'POST' &&
+        request.url.path.endsWith('/v2/sessions');
+    final drop =
+        createDrop ||
+        (dropNextPublish &&
+            request is http.Request &&
+            request.method == 'POST' &&
+            request.body.isNotEmpty &&
+            (jsonDecode(request.body) as Map)['packet']?['action'] ==
+                'publishArtifact');
+    final response = await real.send(request);
+    if (drop) {
+      dropNextPublish = false;
+      dropNextCreate = false;
+      await response.stream.drain<void>();
+      throw http.ClientException('Synthetic lost response after server commit');
+    }
+    return response;
+  }
+
+  @override
+  void close() => real.close();
+}
+
 Future<AgreementDraft> newWorkspaceDraft(PartyRole creator) async {
   final identity = await MockIdentityReader().read(role: creator.name);
   final id = createIdentityNonce();
@@ -56,12 +91,24 @@ void main() {
         await ownerVault.unlock('synthetic owner password');
         final peerVault = AgreementVault(MemoryVaultStorage());
         await peerVault.unlock('synthetic peer password');
-        final ownerRepo = WorkspaceRepository(endpoint),
-            peerRepo = WorkspaceRepository(endpoint);
+        final ownerHttp = LostPublishResponseClient(),
+            peerHttp = LostPublishResponseClient();
+        final ownerRepo = WorkspaceRepository(endpoint, client: ownerHttp),
+            peerRepo = WorkspaceRepository(endpoint, client: peerHttp);
         final owner = WorkspaceService(ownerVault, ownerRepo),
             peer = WorkspaceService(peerVault, peerRepo);
         try {
-          final local = await owner.create(await newWorkspaceDraft(creator));
+          final draft = await newWorkspaceDraft(creator);
+          ownerHttp.dropNextCreate = true;
+          await expectLater(
+            owner.create(draft, formId: 'synthetic-form'),
+            throwsA(isA<http.ClientException>()),
+          );
+          final pendingId = ownerVault.records.single['sessionId'];
+          expect(ownerVault.records.single['version'], 0);
+          final local = await owner.create(draft, formId: 'synthetic-form');
+          expect(local['sessionId'], pendingId);
+          expect(ownerVault.records, hasLength(1));
           final ownerId = local['localId'] as String;
           final invitation = SessionCapabilities.fromInviteFragment(
             owner.invite(local),
@@ -124,11 +171,19 @@ void main() {
             chainId: 421614,
             notaryEnabled: false,
           );
-          final original = await WorkspaceArtifacts(
-            payee,
-            config,
-            artifacts: output,
-          ).finalize(payeeId);
+          (creator == PartyRole.partyA ? ownerHttp : peerHttp).dropNextPublish =
+              true;
+          final manager = WorkspaceArtifacts(payee, config, artifacts: output);
+          await expectLater(
+            manager.finalize(payeeId),
+            throwsA(isA<http.ClientException>()),
+          );
+          final staged = await manager.local(payeeId);
+          expect(payee.record(payeeId)['pending'], isNotNull);
+          await payee.sync(payeeId);
+          final original = await manager.finalize(payeeId);
+          expect(original.zip, staged.zip);
+          expect(original.pdf, staged.pdf);
           expect(payee.record(payeeId)['finalized'], isTrue);
           final repeated = await WorkspaceArtifacts(
             payee,

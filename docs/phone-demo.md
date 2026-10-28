@@ -4,7 +4,7 @@
 
 ## Tạo URL HTTPS tạm
 
-Từ thư mục `app/` trên Windows có Flutter, Node.js 20+ và `cloudflared` trong PATH:
+Từ thư mục `app/` trên Windows có Flutter, Node.js 24+ và `cloudflared` trong PATH:
 
 ```powershell
 ./start-phone-demo.ps1
@@ -12,7 +12,17 @@ Từ thư mục `app/` trên Windows có Flutter, Node.js 20+ và `cloudflared` 
 
 Script build Web với `APP_ENV=staging`, `COORDINATOR_URL=/coordinator`, `NOTARY_ENABLED=false`, sau đó mở server trên `127.0.0.1:8790` và Cloudflare Quick Tunnel. URL `https://….trycloudflare.com` được in ra; Web và coordinator dùng cùng origin nên iPhone không gọi nhầm localhost của chính điện thoại. Không cần cài chứng chỉ tự ký, mở firewall hoặc cài Windows service.
 
-URL chỉ có hiệu lực khi Windows không ngủ và hai tiến trình demo còn chạy; không có bảo đảm uptime và URL thay đổi khi mở tunnel mới. [Cloudflare xác định Quick Tunnel là môi trường thử nghiệm](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/). Bất kỳ ai có URL đều có thể mở bản demo; đây không phải nơi lưu hồ sơ thật. Coordinator chỉ lưu ciphertext nhưng vẫn là storage in-memory, tối đa 200 phiên cùng lúc; restart mất phiên. CORS không phải cơ chế xác thực: từng phiên vẫn cần capability riêng.
+URL chỉ có hiệu lực khi Windows không ngủ và hai tiến trình demo còn chạy; không có bảo đảm uptime và URL thay đổi khi mở tunnel mới. [Cloudflare xác định Quick Tunnel là môi trường thử nghiệm](https://developers.cloudflare.com/tunnel/get-started/quick-tunnels/). Bất kỳ ai có URL đều có thể mở bản demo; đây không phải nơi lưu hồ sơ thật. Server nay lưu ciphertext/token hash vào `.demo/coordinator.sqlite`, tối đa 200 phiên đang giữ, không mất phiên chỉ vì restart nếu giữ nguyên database và chưa hết TTL. CORS không phải xác thực: từng phiên cần capability riêng. Legacy TTL hiện 24 giờ; workflow mới active 7 ngày, sau publish giữ quyền lấy ZIP 30 ngày — không phải lưu trữ vĩnh viễn.
+
+## Hồ sơ và khôi phục
+
+Chọn **Hồ sơ → Mở / tạo kho hợp đồng**, đặt mật khẩu từ 12 ký tự. **Xuất gói khôi phục** và giữ mật khẩu riêng; không gửi gói này cho đối tác vì có quyền/khóa phiên. Khi tạo có thể chọn A hoặc B; A kiểm tài khoản nhận tiền trước khóa, người tạo ký trước, B báo chuyển và A xác nhận nhận. Mỗi bên ký bằng dữ liệu mock mới; chưa phải NFC thật.
+
+Đóng tab rồi mở lại **cùng origin/trình duyệt**: mở kho và chọn hồ sơ để xem bản lưu, bấm Làm mới để lấy trạng thái hiện tại. Bản nháp chỉ tự lưu khi kho mở; chưa mở kho thì vẫn ở RAM. Xóa dữ liệu site/private mode có thể mất kho; cần backup. Gói nhập từ thiết bị khác giữ bản mới hơn, có thể bổ sung khóa hành động gốc nếu thiết bị chỉ đang xem.
+
+Quick Tunnel đổi origin làm trình duyệt không thấy kho cũ; nhập backup mã hóa vào kho mới. Nếu coordinator URL đổi nhưng nhóm đã giữ database, trong chi tiết chọn **Khôi phục sau khi nhóm đổi URL coordinator**, đọc và xác nhận đúng server nhóm kiểm soát. App không tự gửi capability tới endpoint lấy từ file backup. Migration chỉ lưu khi giải mã/kiểm đúng hồ sơ và version không cũ hơn.
+
+A tạo hồ sơ cuối thì ZIP nguyên bản được lưu vào kho trước publish. B lấy cùng ZIP từ coordinator và lưu về kho, không tái tạo PDF/hash khác. Kho và ZIP tải về vẫn giữ sau khi server hết hạn; nếu chưa lưu ZIP/backup thì không có bảo đảm khôi phục. Hồ sơ cũ đã mất capability trước khi có tính năng này không được khôi phục tự động chỉ bằng CCCD hoặc mã hợp đồng.
 
 Nếu đã build bằng đúng script và chưa thay đổi bản build:
 

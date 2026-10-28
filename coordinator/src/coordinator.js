@@ -120,7 +120,7 @@ export function createCoordinator({ now = () => Date.now(), allowedOrigins = nul
 
     try {
       if (request.method === "POST" && url.pathname === "/v1/sessions") {
-        // Public demo has bounded in-memory storage; expired sessions are
+        // Public demo has bounded storage; expired sessions are
         // reclaimed without retaining or logging capabilities/payloads.
         for (const id of sessions.keys()) findSession(id);
         if (sessions.size >= maxSessions) {

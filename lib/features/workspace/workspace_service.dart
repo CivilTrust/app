@@ -4,6 +4,7 @@ import '../../core/models/agreement.dart';
 import '../../core/models/identity_evidence.dart';
 import '../../core/models/party_role.dart';
 import '../../core/models/party_signature.dart';
+import '../../core/config/environment_check.dart';
 import '../identity/identity_context.dart';
 import '../identity/identity_service.dart';
 import '../sessions/session_models.dart';
@@ -31,8 +32,20 @@ class WorkspaceService {
         Map<String, dynamic>.from(record['session'] as Map),
       );
 
-  Future<Map<String, dynamic>> create(AgreementDraft draft) async {
+  Future<Map<String, dynamic>> create(
+    AgreementDraft draft, {
+    String? formId,
+  }) async {
     if (!vault.unlocked) throw StateError('Mở kho trước khi tạo phiên.');
+    if (formId != null) {
+      final existing = vault.records
+          .where((r) => r['sourceFormId'] == formId)
+          .firstOrNull;
+      if (existing != null) {
+        final id = existing['localId'] as String;
+        return existing['version'] == 0 ? resumeCreation(id) : sync(id);
+      }
+    }
     final role = WorkflowRules.creator(draft);
     final state = SigningSession(draft: draft, state: AgreementState.draft);
     await validator.validate(state);
@@ -50,6 +63,7 @@ class WorkspaceService {
       'session': state.toJson(),
       'finalized': false,
       'endpoint': repository.baseUrl,
+      'sourceFormId': ?formId,
     };
     await vault.put(saved['localId'] as String, saved);
     await repository.create(saved);
@@ -58,6 +72,7 @@ class WorkspaceService {
 
   Future<Map<String, dynamic>> resumeCreation(String id) async {
     final saved = record(id);
+    _checkEndpoint(saved);
     if (saved['version'] != 0 || saved['isOwner'] != true) {
       throw StateError('Không phải yêu cầu tạo đang chờ.');
     }
@@ -137,6 +152,43 @@ class WorkspaceService {
         'Hồ sơ thuộc coordinator khác. Không gửi capability tới URL khác; cần xác nhận cấu hình/migration với nhóm.',
       );
     }
+  }
+
+  void ensureEndpoint(Map<String, dynamic> record) => _checkEndpoint(record);
+
+  Future<void> migrateToConfiguredEndpoint(
+    String id, {
+    required bool confirmed,
+  }) async {
+    if (!confirmed) {
+      throw StateError(
+        'Cần xác nhận rõ coordinator mới trước khi gửi capability.',
+      );
+    }
+    final uri = Uri.tryParse(repository.baseUrl);
+    if (uri == null ||
+        !{'http', 'https'}.contains(uri.scheme) ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        (uri.scheme != 'https' && !isLoopback(uri.host))) {
+      throw StateError('Coordinator mới phải HTTPS hoặc localhost phát triển.');
+    }
+    final local = record(id);
+    final snapshot = await repository.read(local);
+    await validator.validate(snapshot.session);
+    final cached = session(local);
+    if (snapshot.version < (local['version'] as int) ||
+        snapshot.role.name != local['role'] ||
+        snapshot.session.draft.id != cached.draft.id ||
+        (cached.frozenDigest != null &&
+            snapshot.session.frozenDigest != cached.frozenDigest)) {
+      throw const FormatException(
+        'Coordinator mới không có đúng hồ sơ hoặc trả bản cũ. Chưa đổi endpoint.',
+      );
+    }
+    await _saveSnapshot({...local, 'endpoint': repository.baseUrl}, snapshot);
   }
 
   String invite(Map<String, dynamic> local) {

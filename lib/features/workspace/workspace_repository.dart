@@ -75,17 +75,19 @@ class WorkspaceRepository {
       'publicKey': await actionKey.publicKey,
     };
     final data = await _data(
-      await _client.post(
-        Uri.parse('$baseUrl/v2/sessions'),
-        headers: {'content-type': 'application/json'},
-        body: jsonEncode({
-          ...packet,
-          'ownerToken': record['token'],
-          'participantToken': record['participantToken'],
-          'createSignature': await actionKey.sign(packet),
-          'encryptedPayload': box.toJson(),
-        }),
-      ),
+      await _client
+          .post(
+            Uri.parse('$baseUrl/v2/sessions'),
+            headers: {'content-type': 'application/json'},
+            body: jsonEncode({
+              ...packet,
+              'ownerToken': record['token'],
+              'participantToken': record['participantToken'],
+              'createSignature': await actionKey.sign(packet),
+              'encryptedPayload': box.toJson(),
+            }),
+          )
+          .timeout(const Duration(seconds: 20)),
     );
     return data;
   }
@@ -105,10 +107,12 @@ class WorkspaceRepository {
   Future<WorkspaceSnapshot> read(Map<String, dynamic> record) async {
     final c = capability(record);
     final data = await _data(
-      await _client.get(
-        Uri.parse('$baseUrl/v2/sessions/${c.sessionId}'),
-        headers: _headers(c),
-      ),
+      await _client
+          .get(
+            Uri.parse('$baseUrl/v2/sessions/${c.sessionId}'),
+            headers: _headers(c),
+          )
+          .timeout(const Duration(seconds: 20)),
     );
     final session = SigningSession.fromJson(
       await cipher.decrypt(
@@ -173,27 +177,31 @@ class WorkspaceRepository {
           : await sha(encryptedArtifact),
     };
     return _data(
-      await _client.post(
-        Uri.parse('$baseUrl/v2/sessions/${c.sessionId}/actions'),
-        headers: _headers(c),
-        body: jsonEncode({
-          'packet': packet,
-          'publicKey': await key.publicKey,
-          'signature': await key.sign(packet),
-          'encryptedPayload': box.toJson(),
-          'encryptedArtifact': ?encryptedArtifact,
-        }),
-      ),
+      await _client
+          .post(
+            Uri.parse('$baseUrl/v2/sessions/${c.sessionId}/actions'),
+            headers: _headers(c),
+            body: jsonEncode({
+              'packet': packet,
+              'publicKey': await key.publicKey,
+              'signature': await key.sign(packet),
+              'encryptedPayload': box.toJson(),
+              'encryptedArtifact': ?encryptedArtifact,
+            }),
+          )
+          .timeout(const Duration(seconds: 20)),
     );
   }
 
   Future<Map<String, dynamic>> artifact(Map<String, dynamic> record) async {
     final c = capability(record);
     final data = await _data(
-      await _client.get(
-        Uri.parse('$baseUrl/v2/sessions/${c.sessionId}/artifact'),
-        headers: _headers(c),
-      ),
+      await _client
+          .get(
+            Uri.parse('$baseUrl/v2/sessions/${c.sessionId}/artifact'),
+            headers: _headers(c),
+          )
+          .timeout(const Duration(seconds: 20)),
     );
     return cipher.decrypt(
       EncryptedEnvelope.fromJson(

@@ -53,6 +53,14 @@ class WorkspaceArtifacts {
     if (record['role'] != 'partyA') {
       throw StateError('Chỉ bên nhận A tạo hồ sơ cuối.');
     }
+    if (record['finalized'] == true) {
+      return record['archive'] == null ? fetch(id) : local(id);
+    }
+    if (record['pending'] != null) {
+      throw StateError(
+        'Hãy làm mới để kiểm tra kết quả công bố trước khi thử lại.',
+      );
+    }
     final current = workspace.session(record);
     if (current.state != AgreementState.paymentConfirmed) {
       throw StateError('A chưa xác nhận nhận tiền.');
@@ -110,6 +118,7 @@ class WorkspaceArtifacts {
 
   Future<ArtifactBundle> fetch(String id) async {
     final record = workspace.record(id);
+    workspace.ensureEndpoint(record);
     final archive = await workspace.repository.artifact(record);
     final bundle = await _checked(id, archive);
     await workspace.vault.put(id, {

@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/flow_widgets.dart';
 import '../../core/config/app_config.dart';
+import '../../core/config/environment_check.dart';
 import '../../core/models/agreement.dart';
 import '../../core/models/party_role.dart';
 import '../identity/identity_context.dart';
@@ -431,6 +432,40 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
               'Tạo đề xuất mới từ nội dung này (không sửa bản đã ký)',
             ),
           ),
+          if (local['endpoint'] != widget.config.coordinatorBaseUrl)
+            OutlinedButton(
+              onPressed: busy
+                  ? null
+                  : () => run(() async {
+                      final approved = await showDialog<bool>(
+                        context: context,
+                        builder: (dialog) => AlertDialog(
+                          title: const Text('Xác nhận đổi địa chỉ coordinator'),
+                          content: Text(
+                            'Hồ sơ cũ thuộc ${endpointOrigin(local['endpoint'] as String)}. App hiện dùng ${endpointOrigin(widget.config.coordinatorBaseUrl)}. Chỉ tiếp tục nếu nhóm kiểm soát server mới và đã giữ database. Capability sẽ được gửi đến server mới; app phải giải mã/kiểm đúng hồ sơ trước khi lưu thay đổi.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dialog, false),
+                              child: const Text('Hủy'),
+                            ),
+                            FilledButton(
+                              onPressed: () => Navigator.pop(dialog, true),
+                              child: const Text('Tôi xác nhận server của nhóm'),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (approved == true) {
+                        await widget.service.migrateToConfiguredEndpoint(
+                          widget.localId,
+                          confirmed: true,
+                        );
+                        message = 'Đã kiểm đúng hồ sơ và cập nhật endpoint.';
+                      }
+                    }),
+              child: const Text('Khôi phục sau khi nhóm đổi URL coordinator'),
+            ),
         ],
       ),
     );

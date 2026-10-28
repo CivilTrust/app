@@ -74,7 +74,7 @@ try {
     }
     $state | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $statePath -Encoding UTF8
     Write-Host "Demo HTTPS: $publicUrl" -ForegroundColor Green
-    Write-Host 'Mock data only. Keep Windows awake. URL changes after restart; coordinator sessions are in memory.'
+    Write-Host 'Mock data only. Keep Windows awake. URL changes after restart; keep .demo/coordinator.sqlite and encrypted recovery backups.'
     Write-Host 'On Windows and iPhone: open Thong tin, then Kiem tra ket noi. Stop with ./stop-phone-demo.ps1.'
 } catch {
     foreach ($process in @($serverProcess, $tunnelProcess)) {

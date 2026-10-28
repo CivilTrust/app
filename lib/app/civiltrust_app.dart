@@ -144,7 +144,7 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
         'Chưa mở kho; không tạo phiên để tránh mất quyền truy cập.',
       );
     }
-    final local = await workspace.create(draft);
+    final local = await workspace.create(draft, formId: formId);
     final previous = vault.records
         .where((r) => r['localId'] == formId)
         .firstOrNull;
@@ -165,6 +165,8 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
           appBar: AppBar(title: const Text('Tiếp tục bản nháp')),
           body: CreateAgreementPage(
             config: config,
+            vault: vault,
+            onUnlockVault: unlock,
             initialForm: form,
             vaultUnlocked: vault.unlocked,
             onPrepared: prepared,
@@ -192,6 +194,8 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
           ? EnvironmentPage(config: config)
           : CreateAgreementPage(
               config: config,
+              vault: vault,
+              onUnlockVault: unlock,
               vaultUnlocked: vault.unlocked,
               onPrepared: prepared,
               onSaveForm: saveForm,

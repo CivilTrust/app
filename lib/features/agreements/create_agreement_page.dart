@@ -14,6 +14,7 @@ import '../../core/models/agreement.dart';
 import '../../core/models/identity_evidence.dart';
 import '../../core/models/party_role.dart';
 import '../workspace/workflow_rules.dart';
+import '../workspace/agreement_vault.dart';
 import '../artifacts/artifact_service.dart';
 import '../identity/identity_service.dart';
 import '../identity/identity_context.dart';
@@ -41,6 +42,8 @@ class CreateAgreementPage extends StatefulWidget {
     this.onSaveForm,
     this.initialForm,
     this.vaultUnlocked = false,
+    this.vault,
+    this.onUnlockVault,
     super.key,
   });
   final AppConfig config;
@@ -50,6 +53,8 @@ class CreateAgreementPage extends StatefulWidget {
   onSaveForm;
   final Map<String, dynamic>? initialForm;
   final bool vaultUnlocked;
+  final AgreementVault? vault;
+  final Future<bool> Function()? onUnlockVault;
 
   @override
   State<CreateAgreementPage> createState() => _CreateAgreementPageState();
@@ -86,11 +91,29 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   PartyRole creatorRole = PartyRole.partyA;
   String formId = 'draft:${createIdentityNonce()}';
   bool _saveQueued = false;
+  bool _vaultWasOpened = false;
+  bool get vaultReady => widget.vault?.unlocked ?? widget.vaultUnlocked;
+  void _vaultChanged() {
+    if (!mounted) return;
+    if (vaultReady) {
+      _vaultWasOpened = true;
+    } else if (_vaultWasOpened) {
+      identityService.cancel();
+      identityA = null;
+      identityConsent = false;
+      confirmedReview = false;
+      reviewDraft = null;
+      if (selectedTemplate != null) stage = 1;
+    }
+    setState(() {});
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _vaultWasOpened = vaultReady;
+    widget.vault?.addListener(_vaultChanged);
     final saved = widget.initialForm;
     if (saved != null) {
       try {
@@ -118,6 +141,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    widget.vault?.removeListener(_vaultChanged);
     identityService.dispose();
     for (final controller in controllers.values) {
       controller.dispose();
@@ -169,7 +193,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   };
 
   void _scheduleSave() {
-    if (_saveQueued || widget.onSaveForm == null || !widget.vaultUnlocked) {
+    if (_saveQueued || widget.onSaveForm == null || !vaultReady) {
       return;
     }
     _saveQueued = true;
@@ -509,61 +533,75 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   }
 
   @override
-  Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-    children: [
-      FlowHeader(
-        title: 'Tạo hợp đồng mới',
-        subtitle: widget.onPrepared == null
-            ? 'Chọn mẫu, xác minh danh tính, điền điều khoản và mời Bên B ký từ xa.'
-            : 'A hoặc B đều có thể tạo. A duyệt thông tin nhận tiền; người tạo ký trước. Danh tính hiện là mock.',
-      ),
-      FlowProgress(
-        current: stage.clamp(0, 5),
-        labels: [
-          'Chọn mẫu',
-          'Danh tính ${creatorRole == PartyRole.partyA ? 'A' : 'B'}',
-          'Điều khoản',
-          'Xem lại',
-          'B ký & chuyển',
-          'Hoàn tất',
-        ],
-      ),
-      const SizedBox(height: 24),
-      if (busy) const LinearProgressIndicator(),
-      if (message.isNotEmpty) ...[
-        const SizedBox(height: 12),
-        Text(
-          message,
-          style: TextStyle(
-            color: message.startsWith('Không')
-                ? Colors.red.shade700
-                : const Color(0xff0f766e),
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-      const SizedBox(height: 16),
-      if (selectedTemplate != null && widget.onSaveForm != null) ...[
-        Text(
-          widget.vaultUnlocked
-              ? 'Bản nháp tự lưu khi chỉnh sửa. Kết quả định danh phải đọc lại khi ký.'
-              : 'Kho chưa mở: bản nháp chỉ ở trong tab. Chọn Lưu bản nháp để bảo vệ trước khi đóng.',
-        ),
-        OutlinedButton.icon(
-          onPressed: busy ? null : saveForm,
-          icon: const Icon(Icons.save_outlined),
-          label: const Text('Lưu bản nháp'),
-        ),
-      ],
-      if (stage == 0) _templatePicker(),
-      if (stage == 1) _identityStep(),
-      if (stage == 2) _detailsStep(),
-      if (stage == 3) _reviewStep(),
-      if (stage == 4) _shareStep(),
-      if (stage == 5) _completedStep(),
-    ],
-  );
+  Widget build(BuildContext context) => _vaultWasOpened && !vaultReady
+      ? ListView(
+          padding: const EdgeInsets.all(24),
+          children: [
+            const FlowHeader(
+              title: 'Kho đã khóa',
+              subtitle: 'Nội dung bản nháp được ẩn. Mở kho để tiếp tục; danh tính và consent sẽ đọc lại.',
+            ),
+            FilledButton(
+              onPressed: widget.onUnlockVault,
+              child: const Text('Mở khóa để tiếp tục bản nháp'),
+            ),
+          ],
+        )
+      : ListView(
+          padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
+          children: [
+            FlowHeader(
+              title: 'Tạo hợp đồng mới',
+              subtitle: widget.onPrepared == null
+                  ? 'Chọn mẫu, xác minh danh tính, điền điều khoản và mời Bên B ký từ xa.'
+                  : 'A hoặc B đều có thể tạo. A duyệt thông tin nhận tiền; người tạo ký trước. Danh tính hiện là mock.',
+            ),
+            FlowProgress(
+              current: stage.clamp(0, 5),
+              labels: [
+                'Chọn mẫu',
+                'Danh tính ${creatorRole == PartyRole.partyA ? 'A' : 'B'}',
+                'Điều khoản',
+                'Xem lại',
+                'B ký & chuyển',
+                'Hoàn tất',
+              ],
+            ),
+            const SizedBox(height: 24),
+            if (busy) const LinearProgressIndicator(),
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(
+                message,
+                style: TextStyle(
+                  color: message.startsWith('Không')
+                      ? Colors.red.shade700
+                      : const Color(0xff0f766e),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (selectedTemplate != null && widget.onSaveForm != null) ...[
+              Text(
+                vaultReady
+                    ? 'Bản nháp tự lưu khi chỉnh sửa. Kết quả định danh phải đọc lại khi ký.'
+                    : 'Kho chưa mở: bản nháp chỉ ở trong tab. Chọn Lưu bản nháp để bảo vệ trước khi đóng.',
+              ),
+              OutlinedButton.icon(
+                onPressed: busy ? null : saveForm,
+                icon: const Icon(Icons.save_outlined),
+                label: const Text('Lưu bản nháp'),
+              ),
+            ],
+            if (stage == 0) _templatePicker(),
+            if (stage == 1) _identityStep(),
+            if (stage == 2) _detailsStep(),
+            if (stage == 3) _reviewStep(),
+            if (stage == 4) _shareStep(),
+            if (stage == 5) _completedStep(),
+          ],
+        );
 
   Widget _templatePicker() => Column(
     children: [
@@ -832,11 +870,15 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       CheckboxListTile(
         value: confirmedReview,
         onChanged: (value) => setState(() => confirmedReview = value ?? false),
-        title: const Text(
-          'Tôi đã đọc, thông tin đúng và đồng ý khóa nội dung này.',
+        title: Text(
+          widget.onPrepared == null
+              ? 'Tôi đã đọc, thông tin đúng và đồng ý khóa nội dung này.'
+              : 'Tôi đã đọc và đồng ý gửi bản đề xuất; chữ ký là bước riêng sau khi A duyệt.',
         ),
-        subtitle: const Text(
-          'Sau bước này, mọi sửa đổi phải tạo hợp đồng mới.',
+        subtitle: Text(
+          widget.onPrepared == null
+              ? 'Sau bước này, mọi sửa đổi phải tạo hợp đồng mới.'
+              : 'Thông tin nhận tiền có thể được A sửa trước khi khóa; cả hai bên sẽ xem lại bản khóa trước khi ký.',
         ),
         controlAffinity: ListTileControlAffinity.leading,
       ),

@@ -135,8 +135,11 @@ class AgreementVault extends ChangeNotifier {
   }
 
   Future<void> put(String id, Map<String, dynamic> record) {
+    final requestedKey = _key;
     final done = _queue.then((_) async {
-      if (!unlocked) throw StateError('Hãy mở khóa kho trước.');
+      if (requestedKey == null || !identical(requestedKey, _key)) {
+        throw StateError('Kho đã khóa/đổi phiên mở; thay đổi chưa được lưu.');
+      }
       await _save({..._records, id: jsonDecode(jsonEncode(record))});
     });
     _queue = done.catchError((_) {});
