@@ -12,6 +12,8 @@ import '../../core/formatting/display_formatters.dart';
 import '../../core/ids/agreement_id.dart';
 import '../../core/models/agreement.dart';
 import '../../core/models/identity_evidence.dart';
+import '../../core/models/party_role.dart';
+import '../workspace/workflow_rules.dart';
 import '../artifacts/artifact_service.dart';
 import '../identity/identity_service.dart';
 import '../identity/identity_context.dart';
@@ -35,10 +37,19 @@ class CreateAgreementPage extends StatefulWidget {
   const CreateAgreementPage({
     required this.config,
     this.identityService,
+    this.onPrepared,
+    this.onSaveForm,
+    this.initialForm,
+    this.vaultUnlocked = false,
     super.key,
   });
   final AppConfig config;
   final IdentityService? identityService;
+  final Future<void> Function(AgreementDraft draft, String formId)? onPrepared;
+  final Future<void> Function(Map<String, dynamic> form, bool explicit)?
+  onSaveForm;
+  final Map<String, dynamic>? initialForm;
+  final bool vaultUnlocked;
 
   @override
   State<CreateAgreementPage> createState() => _CreateAgreementPageState();
@@ -72,11 +83,31 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   String? notaryStatus;
   DateTime? expiresAt;
   String message = '';
+  PartyRole creatorRole = PartyRole.partyA;
+  String formId = 'draft:${createIdentityNonce()}';
+  bool _saveQueued = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final saved = widget.initialForm;
+    if (saved != null) {
+      try {
+        creatorRole = PartyRole.values.byName(saved['creatorRole'] as String);
+        selectTemplate(templateService.byId(saved['templateId'] as String));
+        formId = saved['localId'] as String;
+        final values = Map<String, String>.from(saved['fields'] as Map);
+        for (final entry in controllers.entries) {
+          if (values.containsKey(entry.key)) {
+            entry.value.text = values[entry.key]!;
+          }
+        }
+      } catch (_) {
+        stage = 0;
+        message = 'Bản nháp không hợp lệ; chưa khôi phục dữ liệu.';
+      }
+    }
   }
 
   @override
@@ -110,7 +141,11 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       'accountNumber': TextEditingController(),
       'accountName': TextEditingController(),
     });
+    for (final controller in controllers.values) {
+      controller.addListener(_scheduleSave);
+    }
     setState(() {
+      formId = 'draft:${createIdentityNonce()}';
       selectedTemplate = template;
       reviewDraft = null;
       stage = 1;
@@ -121,16 +156,59 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     });
   }
 
+  Map<String, dynamic> _form() => {
+    'localId': formId,
+    'kind': 'form',
+    'templateId': selectedTemplate!.id,
+    'creatorRole': creatorRole.name,
+    'fields': fields,
+    'savedAt': DateTime.now().toUtc().toIso8601String(),
+    'revision': widget.initialForm?['revision'] ?? 1,
+    if (widget.initialForm?['supersedesAgreementId'] != null)
+      'supersedesAgreementId': widget.initialForm!['supersedesAgreementId'],
+  };
+
+  void _scheduleSave() {
+    if (_saveQueued || widget.onSaveForm == null || !widget.vaultUnlocked) {
+      return;
+    }
+    _saveQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      _saveQueued = false;
+      if (!mounted || selectedTemplate == null || busy) return;
+      try {
+        await widget.onSaveForm!(_form(), false);
+      } catch (_) {
+        if (mounted) {
+          setState(
+            () => message = 'Chưa lưu được bản nháp. Giữ tab và kiểm tra kho.',
+          );
+        }
+      }
+    });
+  }
+
+  Future<void> saveForm() => _run(() async {
+    await widget.onSaveForm!(_form(), true);
+    message = 'Đã lưu bản nháp trong kho mã hóa. Không lưu kết quả NFC hoặc consent để dùng lại.';
+  });
+
   Future<void> readIdentity() => _run(() async {
     final evidence = await identityService.identify(
-      context: IdentityContext.create(ceremonyId: ceremonyId, role: 'partyA'),
+      context: IdentityContext.create(
+        ceremonyId: ceremonyId,
+        role: creatorRole.name,
+      ),
       consent: identityConsent,
     );
     if (!mounted) return;
     identityA = evidence;
-    controllers['accountName']!.text = identityA!.displayName;
+    if (creatorRole == PartyRole.partyA &&
+        controllers['accountName']!.text.isEmpty) {
+      controllers['accountName']!.text = identityA!.displayName;
+    }
     stage = 2;
-    message = 'Đã điền thông tin Bên A từ CCCD mock.';
+    message = 'Đã điền thông tin ${creatorRole.label} từ CCCD mock.';
   });
 
   Map<String, String> get fields => {
@@ -177,6 +255,17 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       'paymentPurpose': PaymentDetails.purposeFor(draftId),
       'signingProtocol': SigningContext.protocol,
       'identityCeremonyId': ceremonyId,
+      if (widget.onPrepared != null) ...{
+        'workflowProfile': WorkflowRules.profile,
+        'creatorRole': creatorRole.name,
+        'payerRole': 'partyB',
+        'payeeRole': 'partyA',
+        'revision': (widget.initialForm?['revision'] ?? 1).toString(),
+        'creatorIdentityCommitment': identityA!.identityCommitment,
+        if (widget.initialForm?['supersedesAgreementId'] != null)
+          'supersedesAgreementId':
+              widget.initialForm!['supersedesAgreementId'] as String,
+      },
     };
     final reviewed = AgreementDraft(
       id: draftId,
@@ -203,6 +292,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     template: selectedTemplate!,
     fields: fields,
     partyA: identityA!,
+    creatorRole: creatorRole,
   );
 
   Future<void> createSession() => _run(() async {
@@ -211,6 +301,12 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     }
     final draft = reviewDraft;
     if (draft == null) throw StateError('Hãy xem lại thông tin trước khi ký.');
+    if (widget.onPrepared != null) {
+      await widget.onSaveForm?.call(_form(), true);
+      await widget.onPrepared!(draft, formId);
+      if (mounted) reset();
+      return;
+    }
     final digest = hash.canonicalObjectHash(draft.toJson());
     final signature = await signer.sign(
       role: 'partyA',
@@ -242,10 +338,15 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Khóa nội dung và ký?'),
-        content: const Text(
-          'Sau bước này, Bên A và Bên B sẽ ký đúng nội dung đang hiển thị. '
-          'Muốn sửa điều khoản, bạn phải tạo phiên và chữ ký mới.',
+        title: Text(
+          widget.onPrepared == null
+              ? 'Khóa nội dung và ký?'
+              : 'Tạo đề xuất và lưu vào kho?',
+        ),
+        content: Text(
+          widget.onPrepared == null
+              ? 'Sau bước này, Bên A và Bên B sẽ ký đúng nội dung đang hiển thị. Muốn sửa điều khoản, bạn phải tạo phiên và chữ ký mới.'
+              : 'Đây chưa phải chữ ký. A sẽ kiểm tra thông tin nhận tiền trước khi khóa, sau đó người tạo ký trước. Quyền phiên được lưu trong kho mã hóa.',
         ),
         actions: [
           TextButton(
@@ -254,7 +355,9 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Khóa và ký'),
+            child: Text(
+              widget.onPrepared == null ? 'Khóa và ký' : 'Tạo đề xuất',
+            ),
           ),
         ],
       ),
@@ -409,15 +512,17 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   Widget build(BuildContext context) => ListView(
     padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
     children: [
-      const FlowHeader(
+      FlowHeader(
         title: 'Tạo hợp đồng mới',
-        subtitle: 'Chọn mẫu, xác minh danh tính, điền điều khoản và mời Bên B ký từ xa.',
+        subtitle: widget.onPrepared == null
+            ? 'Chọn mẫu, xác minh danh tính, điền điều khoản và mời Bên B ký từ xa.'
+            : 'A hoặc B đều có thể tạo. A duyệt thông tin nhận tiền; người tạo ký trước. Danh tính hiện là mock.',
       ),
       FlowProgress(
         current: stage.clamp(0, 5),
-        labels: const [
+        labels: [
           'Chọn mẫu',
-          'Danh tính A',
+          'Danh tính ${creatorRole == PartyRole.partyA ? 'A' : 'B'}',
           'Điều khoản',
           'Xem lại',
           'B ký & chuyển',
@@ -439,6 +544,18 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
         ),
       ],
       const SizedBox(height: 16),
+      if (selectedTemplate != null && widget.onSaveForm != null) ...[
+        Text(
+          widget.vaultUnlocked
+              ? 'Bản nháp tự lưu khi chỉnh sửa. Kết quả định danh phải đọc lại khi ký.'
+              : 'Kho chưa mở: bản nháp chỉ ở trong tab. Chọn Lưu bản nháp để bảo vệ trước khi đóng.',
+        ),
+        OutlinedButton.icon(
+          onPressed: busy ? null : saveForm,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('Lưu bản nháp'),
+        ),
+      ],
       if (stage == 0) _templatePicker(),
       if (stage == 1) _identityStep(),
       if (stage == 2) _detailsStep(),
@@ -450,6 +567,33 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
 
   Widget _templatePicker() => Column(
     children: [
+      if (widget.onPrepared != null) ...[
+        DropdownButtonFormField<PartyRole>(
+          isExpanded: true,
+          initialValue: creatorRole,
+          decoration: const InputDecoration(
+            labelText: 'Vai trò của tôi trong hợp đồng',
+          ),
+          items: [
+            for (final role in PartyRole.values)
+              DropdownMenuItem(
+                value: role,
+                child: Text(
+                  '${role.label} · ${role == PartyRole.partyA ? 'Nhận tiền' : 'Chuyển tiền'}',
+                ),
+              ),
+          ],
+          onChanged: (role) {
+            if (role != null) {
+              setState(() {
+                creatorRole = role;
+                identityA = null;
+              });
+            }
+          },
+        ),
+        const SizedBox(height: 12),
+      ],
       const TrustNotice(
         title: 'Bằng chứng kỹ thuật, không phải công chứng',
         message:
@@ -468,9 +612,8 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   );
 
   Widget _identityStep() => SectionCard(
-    title: selectedTemplate!.kind == ContractKind.loan
-        ? 'Danh tính Bên A · Bên vay'
-        : 'Danh tính Bên A · Bên nhận đặt cọc',
+    title:
+        'Danh tính ${creatorRole.label} · ${creatorRole.businessLabel(selectedTemplate!.id)}',
     icon: Icons.badge_outlined,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -503,8 +646,8 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
           icon: const Icon(Icons.nfc),
           label: Text(
             identityService.isMock
-                ? 'Quét CCCD mock của Bên A'
-                : 'Kiểm tra NFC Bên A',
+                ? 'Quét CCCD mock của ${creatorRole.label}'
+                : 'Kiểm tra NFC ${creatorRole.label}',
           ),
         ),
         if (busy)
@@ -527,15 +670,13 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       child: Column(
         children: [
           SectionCard(
-            title: selectedTemplate!.kind == ContractKind.loan
-                ? 'Bên A · Bên vay'
-                : 'Bên A · Bên nhận đặt cọc',
+            title:
+                '${creatorRole.label} · ${creatorRole.businessLabel(selectedTemplate!.id)}',
             icon: Icons.badge_outlined,
             child: IdentitySummary(
               identity: identityA!.toJson(),
-              role: selectedTemplate!.kind == ContractKind.loan
-                  ? 'Bên A · Bên vay'
-                  : 'Bên A · Bên nhận đặt cọc',
+              role:
+                  '${creatorRole.label} · ${creatorRole.businessLabel(selectedTemplate!.id)}',
             ),
           ),
           const SizedBox(height: 16),
@@ -682,6 +823,11 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
             'Chữ ký demo v2 ràng buộc nội dung, vai trò và danh tính mô phỏng; không xác thực CCCD thật. Xác nhận nhận tiền và PDF cuối '
             'được tạo sau đó, được ghi thành bằng chứng riêng trong hồ sơ.',
       ),
+      if (widget.onPrepared != null)
+        const TrustNotice(
+          title: 'Đây là đề xuất, chưa ký',
+          message: 'Sau khi tạo, A kiểm tra và có thể sửa thông tin tài khoản nhận trước khi khóa. Người tạo và đối tác đều phải xem lại bản đã khóa và đọc danh tính mới khi ký. B luôn chuyển cho A.',
+        ),
       const SizedBox(height: 8),
       CheckboxListTile(
         value: confirmedReview,
@@ -710,7 +856,11 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
                   ? null
                   : confirmAndCreateSession,
               icon: const Icon(Icons.lock),
-              label: const Text('Khóa và ký với danh tính A'),
+              label: Text(
+                widget.onPrepared == null
+                    ? 'Khóa và ký với danh tính A'
+                    : 'Tạo đề xuất và lưu hồ sơ',
+              ),
             ),
           ),
         ],

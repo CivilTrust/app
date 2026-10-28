@@ -12,6 +12,11 @@ import 'package:civiltrust_app/features/workspace/workflow_rules.dart';
 import 'package:civiltrust_app/features/workspace/workspace_repository.dart';
 import 'package:civiltrust_app/features/workspace/workspace_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:civiltrust_app/core/config/app_config.dart';
+import 'package:civiltrust_app/features/artifacts/artifact_service.dart';
+import 'package:civiltrust_app/core/crypto/hash_service.dart';
+import 'package:civiltrust_app/features/workspace/workspace_artifacts.dart';
+import 'package:pdf/widgets.dart' as pw;
 
 Future<AgreementDraft> newWorkspaceDraft(PartyRole creator) async {
   final identity = await MockIdentityReader().read(role: creator.name);
@@ -99,6 +104,62 @@ void main() {
             AgreementState.paymentConfirmed,
           );
           expect(owner.session(restored).events, hasLength(5));
+          var fontLoads = 0;
+          final output = ArtifactService(
+            const HashService(),
+            regularFont: () async {
+              fontLoads++;
+              return pw.Font.helvetica();
+            },
+            boldFont: () async {
+              fontLoads++;
+              return pw.Font.helveticaBold();
+            },
+          );
+          final config = AppConfig(
+            coordinatorBaseUrl: endpoint,
+            notaryBaseUrl: '',
+            rpcUrl: '',
+            registryContract: '',
+            chainId: 421614,
+            notaryEnabled: false,
+          );
+          final original = await WorkspaceArtifacts(
+            payee,
+            config,
+            artifacts: output,
+          ).finalize(payeeId);
+          expect(payee.record(payeeId)['finalized'], isTrue);
+          final repeated = await WorkspaceArtifacts(
+            payee,
+            config,
+            artifacts: output,
+          ).finalize(payeeId);
+          expect(fontLoads, 2);
+          expect(repeated.pdf, original.pdf);
+          expect(repeated.zip, original.zip);
+          await payer.sync(payerId);
+          final downloaded = await WorkspaceArtifacts(
+            payer,
+            config,
+            artifacts: output,
+          ).fetch(payerId);
+          expect(downloaded.pdf, original.pdf);
+          expect(downloaded.zip, original.zip);
+          payer.vault.lock();
+          await payer.vault.unlock(
+            creator == PartyRole.partyB
+                ? 'synthetic owner password'
+                : 'synthetic peer password',
+          );
+          expect(
+            (await WorkspaceArtifacts(
+              payer,
+              config,
+              artifacts: output,
+            ).local(payerId)).zip,
+            original.zip,
+          );
         } finally {
           ownerRepo.close();
           peerRepo.close();

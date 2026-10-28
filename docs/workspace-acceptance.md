@@ -21,3 +21,11 @@ API `/v2/sessions` tách khỏi legacy `/v1`. Phiên lưu role người tạo, s
 Client lưu capability, khóa và mã tạo phiên trước POST; tạo lại cùng mã/key/token là idempotent, không tạo hợp đồng trùng sau mất response. Mỗi thao tác lưu signed intent trước mạng; lỗi mơ hồ yêu cầu làm mới, không tự ký lại. Hồ sơ nhập từ endpoint khác không tự gửi token sang URL mới.
 
 Tests: coordinator 11/11, gồm A/B creator, sai vai trò, stale version, frozen digest và v1 bypass; Flutter validator + live HTTP A/B/vault-reopen 5/5 đạt. Đây vẫn là demo capability + mock identity, không phải bằng chứng hai chủ thể thật hay NFC đã tích hợp. Người sở hữu bearer capability có quyền tương ứng; trusted CCCD verifier vẫn là blocker riêng.
+
+## Giai đoạn 4 — giao diện và hồ sơ nguyên bản
+
+App có chọn vai trò A/B, lưu bản nháp (tự lưu khi kho mở), tiếp tục bản nháp bằng đọc danh tính mới; màn Hồ sơ và chi tiết dùng chung, duyệt tài khoản A trước khóa, ký đúng vai trò, báo chuyển B/xác nhận A. Tạo revision là đề xuất mới với ID/ceremony mới, giữ bản đã ký bất biến. Không thêm tài khoản đăng nhập.
+
+A lưu nguyên ZIP trong vault trước notary/publish; coordinator giữ encrypted artifact nguyên bản, B tải được cùng bytes, PDF hash không đổi. Quyền publish chỉ A sau xác nhận nhận; owner B không được publish thay A. Phiên mới active 7 ngày; sau publish giữ quyền tải 30 ngày trên server, không phải lưu trữ vĩnh viễn. Bản lưu vault/backup vẫn là phần cần thiết. ZIP demo tối đa 5 MiB, kiểm giới hạn giải nén; không đẩy dữ liệu CCCD thật vào luồng này.
+
+Test live Dart/Node cho hai hướng creator đã đi qua xác nhận tiền, publish, tải lại bởi B và mở lại ZIP từ vault: 2/2 đạt, assert cùng bytes PDF/ZIP và không load font để tái tạo. Widget role B/narrow viewport và luồng review/payment đã đạt sau sửa dropdown expanded và cập nhật thao tác cuộn theo bố cục mới. Web QA release build đạt. Nghiệm thu trình duyệt và kiểm lỗi gián đoạn được ghi tiếp ở giai đoạn 5.

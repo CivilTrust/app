@@ -11,7 +11,10 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       await tester.pumpWidget(const CivilTrustApp());
-      await tester.ensureVisible(find.text('Hợp đồng đặt cọc'));
+      await tester.pumpAndSettle();
+      // Role selection and vault notice precede the template cards now.
+      await tester.drag(find.byType(ListView).first, const Offset(0, -400));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Hợp đồng đặt cọc'));
       await tester.pumpAndSettle();
       await tester.tap(find.byType(CheckboxListTile).first);

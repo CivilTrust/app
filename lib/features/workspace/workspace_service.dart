@@ -3,6 +3,7 @@ import '../../core/encoding/encoding_utils.dart';
 import '../../core/models/agreement.dart';
 import '../../core/models/identity_evidence.dart';
 import '../../core/models/party_role.dart';
+import '../../core/models/party_signature.dart';
 import '../identity/identity_context.dart';
 import '../identity/identity_service.dart';
 import '../sessions/session_models.dart';
@@ -110,6 +111,7 @@ class WorkspaceService {
       'lastSyncedAt': DateTime.now().toUtc().toIso8601String(),
       'finalized': snapshot.finalized,
       'pending': null,
+      'registeredKeys': snapshot.keys,
       'readOnly': registered != null && registered != await key.publicKey,
     });
   }
@@ -119,6 +121,12 @@ class WorkspaceService {
     _checkEndpoint(local);
     final snapshot = await repository.read(local);
     await validator.validate(snapshot.session);
+    if (snapshot.version < (local['version'] as int) ||
+        snapshot.role.name != local['role']) {
+      throw const FormatException(
+        'Server trả snapshot cũ hoặc sai vai trò; giữ nguyên bản cục bộ.',
+      );
+    }
     await _saveSnapshot(local, snapshot);
     return record(id);
   }
@@ -198,7 +206,7 @@ class WorkspaceService {
       );
     }
     await validator.validate(current);
-    dynamic signature;
+    PartySignature? signature;
     if (action == WorkflowAction.sign) {
       if (!consent || identityService == null) {
         throw StateError(

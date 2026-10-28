@@ -8,6 +8,7 @@ import '../../core/encoding/encoding_utils.dart';
 import '../sessions/session_cipher.dart';
 import '../sessions/session_models.dart';
 import 'vault_storage.dart';
+import 'workflow_event.dart';
 
 class AgreementVault extends ChangeNotifier {
   AgreementVault(this.storage);
@@ -121,6 +122,11 @@ class AgreementVault extends ChangeNotifier {
       'revision': expected + 1,
       'box': box.toJson(),
     });
+    if (payload.length > 64 * 1024 * 1024) {
+      throw StateError(
+        'Kho vượt giới hạn demo; xuất gói khôi phục và kiểm tra dung lượng.',
+      );
+    }
     await storage.write(payload, expected);
     if (!identical(key, _key)) return;
     _revision++;
@@ -156,7 +162,29 @@ class AgreementVault extends ChangeNotifier {
       for (final record in candidate.records) {
         final id = record['localId'] as String;
         // Existing records win: importing an old backup cannot roll them back.
-        if (!_records.containsKey(id)) await put(id, record);
+        if (!_records.containsKey(id)) {
+          await put(id, record);
+        } else {
+          final current = Map<String, dynamic>.from(_records[id] as Map);
+          // Recover a missing action key without rolling back the newer snapshot.
+          if (current['readOnly'] == true &&
+              record['actionSeed'] is String &&
+              current['key'] == record['key'] &&
+              current['token'] == record['token'] &&
+              current['role'] == record['role']) {
+            final restored = await WorkflowKey(
+              base64UrlDecodeNoPadding(record['actionSeed'] as String),
+            ).publicKey;
+            if ((current['registeredKeys'] as Map?)?[current['role']] ==
+                restored) {
+              await put(id, {
+                ...current,
+                'actionSeed': record['actionSeed'],
+                'readOnly': false,
+              });
+            }
+          }
+        }
       }
     } finally {
       candidate.lock();

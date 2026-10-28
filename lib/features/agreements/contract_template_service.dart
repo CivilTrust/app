@@ -1,4 +1,5 @@
 import '../../core/models/identity_evidence.dart';
+import '../../core/models/party_role.dart';
 import '../../core/formatting/display_formatters.dart';
 import 'contract_template.dart';
 
@@ -126,9 +127,14 @@ class ContractTemplateService {
     required ContractTemplate template,
     required Map<String, String> fields,
     required IdentityEvidence partyA,
+    PartyRole creatorRole = PartyRole.partyA,
   }) {
     final a = partyA.attributes;
-    final partyALabel = template.kind == ContractKind.deposit
+    final partyALabel = creatorRole == PartyRole.partyB
+        ? (template.kind == ContractKind.deposit
+              ? 'BÊN B (BÊN ĐẶT CỌC)'
+              : 'BÊN B (BÊN CHO VAY)')
+        : template.kind == ContractKind.deposit
         ? 'BÊN A (BÊN NHẬN ĐẶT CỌC)'
         : 'BÊN A (BÊN VAY)';
     final identity =
@@ -136,10 +142,17 @@ class ContractTemplateService {
         'CCCD ${a['documentNumber'] ?? partyA.documentNumberMasked}, '
         'sinh ngày ${a['dateOfBirth'] ?? 'chưa có'}, '
         'địa chỉ ${a['permanentAddress'] ?? 'chưa có'}.';
+    final counterparty = creatorRole == PartyRole.partyA
+        ? (template.kind == ContractKind.deposit
+              ? 'BÊN B (BÊN ĐẶT CỌC)'
+              : 'BÊN B (BÊN CHO VAY)')
+        : (template.kind == ContractKind.deposit
+              ? 'BÊN A (BÊN NHẬN ĐẶT CỌC)'
+              : 'BÊN A (BÊN VAY)');
     if (template.kind == ContractKind.deposit) {
       return '''$identity
 
-BÊN B (BÊN ĐẶT CỌC): Thông tin định danh được ghi tại khối chữ ký sau khi Bên B xác minh CCCD.
+$counterparty: Thông tin định danh được ghi tại khối chữ ký khi bên còn lại ký. Không thay đổi nội dung đã khóa để điền thêm danh tính.
 
 ĐIỀU 1. ĐỐI TƯỢNG ĐẶT CỌC
 ${fields['assetType']}: ${fields['assetDescription']}.
@@ -160,7 +173,7 @@ Hai bên khai đúng thông tin nhân thân, tự nguyện giao kết và ưu ti
     }
     return '''$identity
 
-BÊN B (BÊN CHO VAY): Thông tin định danh được ghi tại khối chữ ký sau khi Bên B xác minh CCCD.
+$counterparty: Thông tin định danh được ghi tại khối chữ ký khi bên còn lại ký. Không thay đổi nội dung đã khóa để điền thêm danh tính.
 
 ĐIỀU 1. KHOẢN VAY
 Bên B đồng ý cho Bên A vay ${DisplayFormatters.vnd(_parseMoney(fields['principalAmount']))}.

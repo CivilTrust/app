@@ -22,10 +22,12 @@ class JoinAgreementPage extends StatefulWidget {
   const JoinAgreementPage({
     required this.config,
     this.identityService,
+    this.onWorkspaceInvite,
     super.key,
   });
   final AppConfig config;
   final IdentityService? identityService;
+  final Future<void> Function(SessionCapabilities)? onWorkspaceInvite;
 
   @override
   State<JoinAgreementPage> createState() => _JoinAgreementPageState();
@@ -77,6 +79,13 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
 
   Future<void> open() => _run(() async {
     final opened = parseParticipantInvite(inviteController.text);
+    if (opened.workflowProfile != null) {
+      if (widget.onWorkspaceInvite == null) {
+        throw StateError('Mở lời mời này bằng giao diện Hồ sơ mới.');
+      }
+      await widget.onWorkspaceInvite!(opened);
+      return;
+    }
     final snapshot = await repository.read(opened);
     await SessionValidator(
       const HashService(),

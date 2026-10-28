@@ -206,6 +206,9 @@ class ArtifactService {
   }
 
   EvidenceManifest importZip(Uint8List bytes) {
+    if (bytes.length > 5 * 1024 * 1024) {
+      throw const FormatException('ZIP vượt giới hạn demo 5 MiB.');
+    }
     if (!_containsBytes(bytes, const [0x50, 0x4b, 0x05, 0x06])) {
       throw const FormatException(
         'ZIP bị hỏng hoặc là gói cũ tạo từ Flutter Web. Hãy hoàn tất lại '
@@ -213,6 +216,13 @@ class ArtifactService {
       );
     }
     final archive = ZipDecoder().decodeBytes(bytes);
+    if (archive.files.length > 8 ||
+        archive.files.fold<int>(0, (sum, file) => sum + file.size) >
+            32 * 1024 * 1024) {
+      throw const FormatException(
+        'ZIP có quá nhiều nội dung hoặc kích thước giải nén quá lớn.',
+      );
+    }
     final pdfFile = _findFile(archive, 'agreement.pdf');
     final evidenceFile = _findFile(archive, 'evidence.civiltrust.json');
     if (pdfFile == null || evidenceFile == null) {
@@ -242,6 +252,18 @@ class ArtifactService {
       throw const FormatException('Evidence đã bị thay đổi.');
     }
     return manifest;
+  }
+
+  ArtifactBundle restoreBundle(Uint8List bytes) {
+    final evidence = importZip(bytes);
+    final archive = ZipDecoder().decodeBytes(bytes);
+    return ArtifactBundle(
+      pdf: Uint8List.fromList(
+        _findFile(archive, 'agreement.pdf')!.content as List<int>,
+      ),
+      evidence: evidence,
+      zip: bytes,
+    );
   }
 
   /// Store mode avoids an archive 4.4.0 Web deflate byte-order bug that
