@@ -1,5 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { corsPolicy } from "./cors.js";
+import { MemorySessionStore } from './session-store.js';
 
 const JSON_LIMIT_BYTES = 2 * 1024 * 1024;
 const DEFAULT_TTL_SECONDS = 24 * 60 * 60;
@@ -67,8 +68,8 @@ function validEnvelope(value) {
   );
 }
 
-export function createCoordinator({ now = () => Date.now(), allowedOrigins = null, maxSessions = 200 } = {}) {
-  const sessions = new Map();
+export function createCoordinator({ now = () => Date.now(), allowedOrigins = null, maxSessions = 200, store = new MemorySessionStore() } = {}) {
+  const sessions = store;
 
   function findSession(id) {
     const session = sessions.get(id);
@@ -172,6 +173,10 @@ export function createCoordinator({ now = () => Date.now(), allowedOrigins = nul
         json(response, 404, { error: "Session not found or expired" }, headers);
         return;
       }
+      if (session.workflowProfile) {
+        json(response, 404, { error: 'Use the versioned workflow endpoint' }, headers);
+        return;
+      }
 
       const token = bearerToken(request);
       const isOwner = hasToken(session.ownerTokenHash, token);
@@ -213,6 +218,9 @@ export function createCoordinator({ now = () => Date.now(), allowedOrigins = nul
         }
         session.encryptedPayload = body.encryptedPayload;
         session.version += 1;
+        if (!sessions.set(id, session, body.expectedVersion)) {
+          json(response, 409, { error: 'Version conflict' }, headers); return;
+        }
         json(response, 200, { data: { version: session.version } }, headers);
         return;
       }
@@ -224,6 +232,9 @@ export function createCoordinator({ now = () => Date.now(), allowedOrigins = nul
         }
         session.finalized = true;
         session.version += 1;
+        if (!sessions.set(id, session, session.version - 1)) {
+          json(response, 409, { error: 'Version conflict' }, headers); return;
+        }
         json(response, 200, { data: { version: session.version, finalized: true } }, headers);
         return;
       }

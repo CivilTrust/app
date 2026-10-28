@@ -44,6 +44,8 @@ dependencies:
   file_saver: ^0.7.0
   qr_flutter: ^4.1.0
   share_plus: ^13.3.1
+  web: ^1.1.1
+  path_provider: ^2.1.5
   web3dart: 3.0.3
 
 dev_dependencies:

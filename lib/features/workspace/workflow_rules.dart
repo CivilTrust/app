@@ -8,8 +8,9 @@ class WorkflowRules {
   static bool supports(AgreementDraft draft) =>
       draft.fields['workflowProfile'] == profile;
   static PartyRole creator(AgreementDraft draft) {
-    if (!supports(draft))
+    if (!supports(draft)) {
       throw const FormatException('Unknown workflow profile');
+    }
     return PartyRole.values.byName(draft.fields['creatorRole']!);
   }
 
@@ -22,8 +23,9 @@ class WorkflowRules {
   ) {
     switch (action) {
       case WorkflowAction.approve:
-        if (state == AgreementState.draft && actor == PartyRole.partyA)
+        if (state == AgreementState.draft && actor == PartyRole.partyA) {
           return AgreementState.contentFrozen;
+        }
       case WorkflowAction.sign:
         if (state == AgreementState.contentFrozen && actor == creatorRole) {
           return actor == PartyRole.partyA
@@ -39,11 +41,14 @@ class WorkflowRules {
           return AgreementState.bothSigned;
         }
       case WorkflowAction.reportTransfer:
-        if (state == AgreementState.bothSigned && actor == PartyRole.partyB)
+        if (state == AgreementState.bothSigned && actor == PartyRole.partyB) {
           return AgreementState.paymentPending;
+        }
       case WorkflowAction.confirmReceived:
-        if (state == AgreementState.paymentPending && actor == PartyRole.partyA)
+        if (state == AgreementState.paymentPending &&
+            actor == PartyRole.partyA) {
           return AgreementState.paymentConfirmed;
+        }
     }
     throw const FormatException(
       'Hành động không đúng vai trò hoặc trạng thái.',
