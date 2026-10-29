@@ -14,12 +14,15 @@ class WorkflowEngine {
     WorkflowAction action, {
     PartySignature? signature,
     String? paymentReference,
+    Map<String, dynamic>? transfer,
+    Map<String, dynamic>? response,
   }) async {
     final state = WorkflowRules.next(
       current.state,
       role,
       WorkflowRules.creator(current.draft),
       action,
+      payerProposal: WorkflowRules.isPayerProposal(current.draft),
     );
     final payment = action == WorkflowAction.confirmReceived
         ? PaymentReceipt(
@@ -44,6 +47,10 @@ class WorkflowEngine {
           ? hash.canonicalObjectHash(signature!.toJson())
           : action == WorkflowAction.confirmReceived
           ? hash.canonicalObjectHash(payment!.toJson())
+          : action == WorkflowAction.reportTransfer && transfer != null
+          ? hash.canonicalObjectHash(transfer)
+          : response != null
+          ? hash.canonicalObjectHash(response)
           : '',
     };
     final event = <String, dynamic>{
@@ -53,10 +60,14 @@ class WorkflowEngine {
     };
     return current.copyWith(
       state: state,
-      frozenDigest: digest,
+      frozenDigest: action == WorkflowAction.approve
+          ? digest
+          : current.frozenDigest,
       partyA: role == PartyRole.partyA ? signature : null,
       partyB: role == PartyRole.partyB ? signature : null,
       payment: payment,
+      transfer: transfer,
+      response: response,
       events: [...current.events, event],
     );
   }

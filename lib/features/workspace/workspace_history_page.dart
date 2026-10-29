@@ -9,6 +9,7 @@ import '../../app/flow_widgets.dart';
 import 'agreement_vault.dart';
 import 'workflow_rules.dart';
 import 'workspace_service.dart';
+import '../../core/models/party_role.dart';
 
 class WorkspaceHistoryPage extends StatefulWidget {
   const WorkspaceHistoryPage({
@@ -187,7 +188,7 @@ class _WorkspaceHistoryPageState extends State<WorkspaceHistoryPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Vai trò: ${record['creatorRole']} · chưa ký, chưa gửi coordinator',
+              'Vai trò: ${record['creatorRole'] == 'partyA' ? 'Bên A' : 'Bên B'} · chưa ký, chưa gửi coordinator',
             ),
             FilledButton(
               onPressed: busy
@@ -208,7 +209,7 @@ class _WorkspaceHistoryPageState extends State<WorkspaceHistoryPage> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Vai trò: ${record['role']} · ${record['isOwner'] == true ? 'Người tạo' : 'Người được mời'}',
+              'Vai trò: ${PartyRole.values.byName(record['role'] as String).label} · ${record['isOwner'] == true ? 'Người tạo' : 'Người được mời'}',
             ),
             Text(WorkflowRules.status(session)),
             Text(

@@ -280,7 +280,9 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       'signingProtocol': SigningContext.protocol,
       'identityCeremonyId': ceremonyId,
       if (widget.onPrepared != null) ...{
-        'workflowProfile': WorkflowRules.profile,
+        'workflowProfile': creatorRole == PartyRole.partyB
+            ? WorkflowRules.payerProfile
+            : WorkflowRules.profile,
         'creatorRole': creatorRole.name,
         'payerRole': 'partyB',
         'payeeRole': 'partyA',
@@ -291,6 +293,12 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
               widget.initialForm!['supersedesAgreementId'] as String,
       },
     };
+    if (widget.onPrepared != null && creatorRole == PartyRole.partyB) {
+      paymentFields.removeWhere(
+        (key, value) =>
+            {'bankBin', 'accountNumber', 'accountName'}.contains(key),
+      );
+    }
     final reviewed = AgreementDraft(
       id: draftId,
       title: selectedTemplate!.title,
@@ -302,7 +310,9 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     );
     // Validate everything before presenting the exact immutable snapshot A
     // will sign, including reference/version and beneficiary fields.
-    PaymentDetails.fromDraft(reviewed);
+    if (creatorRole != PartyRole.partyB || widget.onPrepared == null) {
+      PaymentDetails.fromDraft(reviewed);
+    }
     setState(() {
       reviewDraft = reviewed;
       confirmedReview = false;
@@ -370,7 +380,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
         content: Text(
           widget.onPrepared == null
               ? 'Sau bước này, Bên A và Bên B sẽ ký đúng nội dung đang hiển thị. Muốn sửa điều khoản, bạn phải tạo phiên và chữ ký mới.'
-              : 'Đây chưa phải chữ ký. A sẽ kiểm tra thông tin nhận tiền trước khi khóa, sau đó người tạo ký trước. Quyền phiên được lưu trong kho mã hóa.',
+              : 'Đây chưa phải chữ ký. A cung cấp/kiểm tra thông tin nhận tiền, khóa bản cuối và ký trước. B kiểm tra rồi ký. Quyền phiên được lưu trong kho mã hóa.',
         ),
         actions: [
           TextButton(
@@ -554,7 +564,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
               title: 'Tạo hợp đồng mới',
               subtitle: widget.onPrepared == null
                   ? 'Chọn mẫu, xác minh danh tính, điền điều khoản và mời Bên B ký từ xa.'
-                  : 'A hoặc B đều có thể tạo. A duyệt thông tin nhận tiền; người tạo ký trước. Danh tính hiện là mock.',
+                  : 'A hoặc B đều có thể tạo. A bổ sung thông tin nhận tiền và ký trước; B kiểm tra, ký rồi chuyển khoản. Danh tính hiện là mock.',
             ),
             FlowProgress(
               current: stage.clamp(0, 5),
@@ -725,6 +735,12 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
                 : Icons.handshake_outlined,
             child: Column(
               children: [
+                if (widget.onPrepared != null &&
+                    creatorRole == PartyRole.partyB)
+                  const TrustNotice(
+                    title: 'B chỉ soạn điều khoản của đề xuất',
+                    message: 'Bạn không cần nhập danh tính hoặc tài khoản của A. Sau lời mời, A đọc mock, bổ sung tài khoản và ký trước; bạn kiểm tra bản cuối rồi ký.',
+                  ),
                 for (final field in selectedTemplate!.fields) ...[
                   TextFormField(
                     controller: controllers[field.key],
@@ -758,47 +774,48 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
             ),
           ),
           const SizedBox(height: 16),
-          SectionCard(
-            title: 'Tài khoản nhận tiền và VietQR',
-            icon: Icons.qr_code_2,
-            child: Column(
-              children: [
-                TrustNotice(
-                  title: 'Chiều chuyển tiền',
-                  message: selectedTemplate!.kind == ContractKind.loan
-                      ? 'Bên B là bên cho vay, giải ngân khoản vay vào tài khoản của Bên A.'
-                      : 'Bên B là bên đặt cọc, chuyển tiền đặt cọc vào tài khoản của Bên A.',
-                ),
-                const SizedBox(height: 14),
-                TextFormField(
-                  controller: controllers['bankBin'],
-                  decoration: const InputDecoration(
-                    labelText: 'Mã BIN ngân hàng',
-                    helperText: '970436 là Vietcombank',
+          if (widget.onPrepared == null || creatorRole == PartyRole.partyA)
+            SectionCard(
+              title: 'Tài khoản nhận tiền và VietQR',
+              icon: Icons.qr_code_2,
+              child: Column(
+                children: [
+                  TrustNotice(
+                    title: 'Chiều chuyển tiền',
+                    message: selectedTemplate!.kind == ContractKind.loan
+                        ? 'Bên B là bên cho vay, giải ngân khoản vay vào tài khoản của Bên A.'
+                        : 'Bên B là bên đặt cọc, chuyển tiền đặt cọc vào tài khoản của Bên A.',
                   ),
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  validator: validator.validateBankBin,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: controllers['accountNumber'],
-                  decoration: const InputDecoration(
-                    labelText: 'Số tài khoản nhận tiền',
+                  const SizedBox(height: 14),
+                  TextFormField(
+                    controller: controllers['bankBin'],
+                    decoration: const InputDecoration(
+                      labelText: 'Mã BIN ngân hàng',
+                      helperText: '970436 là Vietcombank',
+                    ),
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    validator: validator.validateBankBin,
                   ),
-                  validator: validator.validateAccountNumber,
-                ),
-                const SizedBox(height: 12),
-                TextFormField(
-                  controller: controllers['accountName'],
-                  decoration: const InputDecoration(
-                    labelText: 'Tên chủ tài khoản',
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: controllers['accountNumber'],
+                    decoration: const InputDecoration(
+                      labelText: 'Số tài khoản nhận tiền',
+                    ),
+                    validator: validator.validateAccountNumber,
                   ),
-                  validator: _required,
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    controller: controllers['accountName'],
+                    decoration: const InputDecoration(
+                      labelText: 'Tên chủ tài khoản',
+                    ),
+                    validator: _required,
+                  ),
+                ],
+              ),
             ),
-          ),
           const SizedBox(height: 16),
           Row(
             children: [
@@ -852,7 +869,11 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       SectionCard(
         title: 'Thông tin chuyển khoản sẽ được khóa',
         icon: Icons.account_balance,
-        child: SelectableText(PaymentDetails.fromDraft(reviewDraft!).copyText),
+        child: SelectableText(
+          creatorRole == PartyRole.partyB && widget.onPrepared != null
+              ? 'A sẽ tự cung cấp danh tính và tài khoản nhận tiền sau khi được mời. A ký trước; bạn kiểm tra bản cuối rồi ký.'
+              : PaymentDetails.fromDraft(reviewDraft!).copyText,
+        ),
       ),
       const SizedBox(height: 12),
       const TrustNotice(

@@ -7,6 +7,7 @@ import '../signing/party_signer.dart';
 import '../signing/signing_context.dart';
 import 'workflow_event.dart';
 import 'workflow_rules.dart';
+import 'payer_proposal.dart';
 
 Future<void> validateWorkflow(
   SigningSession session,
@@ -22,13 +23,29 @@ Future<void> validateWorkflow(
       int.tryParse(fields['revision'] ?? '') == null) {
     throw const FormatException('Workflow metadata không hợp lệ.');
   }
-  PaymentDetails.fromDraft(session.draft);
+  final payer = WorkflowRules.isPayerProposal(session.draft);
+  if (payer && creator != PartyRole.partyB) {
+    throw const FormatException('Profile đề xuất B chỉ dành cho B tạo.');
+  }
+  if (!payer ||
+      session.events.any((e) => (e['body'] as Map)['action'] == 'approve')) {
+    PaymentDetails.fromDraft(session.draft);
+  }
+  if (payer &&
+      session.events.any((e) => (e['body'] as Map)['action'] == 'approve') &&
+      (fields['partyAIdentityCommitment']?.isNotEmpty != true ||
+          fields['partyAIdentitySummary']?.isNotEmpty != true ||
+          fields['proposalDigest'] != proposalTermsDigest(session.draft))) {
+    throw const FormatException(
+      'Thiếu danh tính A hoặc điều khoản đề xuất đã bị sửa.',
+    );
+  }
   final digest = hash.canonicalObjectHash(session.draft.toJson());
   var state = AgreementState.draft;
   var previous = '';
   final signatures = {'partyA': session.partyA, 'partyB': session.partyB};
   final signedRoles = <String>{};
-  if (session.events.length > 6) {
+  if (session.events.length > (payer ? 7 : 6)) {
     throw const FormatException('Quá nhiều workflow event.');
   }
   for (final event in session.events) {
@@ -55,6 +72,25 @@ Future<void> validateWorkflow(
         throw const FormatException('Thiếu xác nhận của A.');
       }
       detailsHash = hash.canonicalObjectHash(session.payment!.toJson());
+    } else if (payer && action == WorkflowAction.reportTransfer) {
+      if (session.transfer == null) {
+        throw const FormatException('Thiếu thông báo chuyển khoản của B.');
+      }
+      TransferEvidence.validate(session.transfer!, session.draft.id);
+      detailsHash = hash.canonicalObjectHash(session.transfer!);
+    } else if (payer &&
+        {
+          WorkflowAction.requestChanges,
+          WorkflowAction.decline,
+          WorkflowAction.reportIssue,
+        }.contains(action)) {
+      if (session.response?['action'] != action.name ||
+          session.response?['note'] is! String ||
+          (session.response!['note'] as String).trim().isEmpty ||
+          (session.response!['note'] as String).length > 500) {
+        throw const FormatException('Thiếu phản hồi của A.');
+      }
+      detailsHash = hash.canonicalObjectHash(session.response!);
     }
     final expected = <String, dynamic>{
       'domain': 'civiltrust-workflow-event/1',
@@ -80,8 +116,39 @@ Future<void> validateWorkflow(
     if (signatures[role.name] != null && identityKey != key) {
       throw const FormatException('Khóa hành động không khớp người ký.');
     }
-    state = WorkflowRules.next(state, role, creator, action);
+    state = WorkflowRules.next(
+      state,
+      role,
+      creator,
+      action,
+      payerProposal: payer,
+    );
     previous = workflowEventHash(event);
+  }
+  if (session.transfer != null &&
+      (!payer ||
+          !session.events.any(
+            (e) => (e['body'] as Map)['action'] == 'reportTransfer',
+          ))) {
+    throw const FormatException('Thông báo chuyển khoản không có event.');
+  }
+  if (session.response != null &&
+      (!payer ||
+          session.events
+                  .where(
+                    (e) =>
+                        (e['body'] as Map)['action'] ==
+                        session.response!['action'],
+                  )
+                  .length !=
+              1)) {
+    throw const FormatException('Phản hồi không khớp event.');
+  }
+  if (payer &&
+      session.partyA != null &&
+      session.partyA!.identity['identityCommitment'] !=
+          fields['partyAIdentityCommitment']) {
+    throw const FormatException('Danh tính A thay đổi sau khi khóa.');
   }
   for (final entry in signatures.entries) {
     if ((entry.value != null) != signedRoles.contains(entry.key)) {
@@ -99,7 +166,12 @@ Future<void> validateWorkflow(
       ? AgreementState.paymentConfirmed
       : session.state;
   if (actual != state ||
-      (state != AgreementState.draft && session.frozenDigest != digest) ||
+      (!{
+            AgreementState.draft,
+            AgreementState.changesRequested,
+            AgreementState.declined,
+          }.contains(state) &&
+          session.frozenDigest != digest) ||
       (state == AgreementState.draft && session.frozenDigest != null)) {
     throw const FormatException('Trạng thái không khớp chuỗi bằng chứng.');
   }

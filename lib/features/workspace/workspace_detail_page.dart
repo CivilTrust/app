@@ -1,11 +1,15 @@
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+
+import '../../core/encoding/encoding_utils.dart';
 
 import '../../app/flow_widgets.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/environment_check.dart';
 import '../../core/models/agreement.dart';
+import '../../core/models/identity_evidence.dart';
 import '../../core/models/party_role.dart';
 import '../identity/identity_context.dart';
 import '../identity/identity_service.dart';
@@ -15,6 +19,7 @@ import '../sessions/invite_url.dart';
 import 'workflow_rules.dart';
 import 'workspace_artifacts.dart';
 import 'workspace_service.dart';
+import 'payer_proposal.dart';
 
 class WorkspaceDetailPage extends StatefulWidget {
   const WorkspaceDetailPage({
@@ -43,6 +48,10 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
       key: TextEditingController(),
   };
   final reference = TextEditingController();
+  final feedback = TextEditingController();
+  Uint8List? attachment;
+  IdentityEvidence? recipientPreview;
+  bool transferDeclared = false, attachmentReviewed = false;
   bool busy = false, reviewed = false, consent = false, received = false;
   String message = '';
   Map<String, dynamic> get record => widget.service.record(widget.localId);
@@ -72,6 +81,11 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
         controller.clear();
       }
       reference.clear();
+      feedback.clear();
+      recipientPreview = null;
+      attachment = null;
+      transferDeclared = false;
+      attachmentReviewed = false;
       reviewed = false;
       consent = false;
       received = false;
@@ -93,6 +107,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
       c.dispose();
     }
     reference.dispose();
+    feedback.dispose();
     super.dispose();
   }
 
@@ -111,10 +126,21 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
     await widget.service.sync(widget.localId);
     if (!mounted) return;
     loadBank();
+    recipientPreview = null;
     reviewed = false;
     consent = false;
     received = false;
     message = 'Đã đồng bộ và kiểm chuỗi chữ ký. Danh tính vẫn là mock; trạng thái tiền là tự khai.';
+    if (WorkflowRules.isPayerProposal(session.draft) &&
+        session.partyA != null &&
+        session.partyB != null &&
+        record['pending'] == null) {
+      try {
+        await artifacts.savePayerStage(widget.localId);
+      } catch (_) {
+        message = 'Đã đồng bộ. Chưa lưu/tải được gói PDF nguyên bản; dùng nút lưu hồ sơ để thử lại, không ký lại.';
+      }
+    }
     if (record['finalized'] == true && record['archive'] == null) {
       await artifacts.fetch(widget.localId);
     }
@@ -133,6 +159,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
         PartyRole.values.byName(record['role'] as String),
         WorkflowRules.creator(session.draft),
         action,
+        payerProposal: WorkflowRules.isPayerProposal(session.draft),
       );
       return true;
     } catch (_) {
@@ -148,6 +175,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
     final fresh = await widget.service.sync(widget.localId);
     if (fresh['version'] != before) {
       loadBank();
+      recipientPreview = null;
       reviewed = false;
       consent = false;
       received = false;
@@ -162,12 +190,65 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
       consent: consent && reviewed,
       bankFields: action == WorkflowAction.approve ? bankValues : null,
       paymentReference: reference.text,
+      attachment: attachment,
+      responseNote: feedback.text,
+      recipientEvidence: recipientPreview,
     );
     reviewed = false;
+    recipientPreview = null;
     consent = false;
     received = false;
     loadBank();
     message = 'Đã lưu và đồng bộ thao tác ${action.name}.';
+    if (WorkflowRules.isPayerProposal(session.draft) &&
+        session.partyA != null &&
+        session.partyB != null) {
+      try {
+        if (action == WorkflowAction.confirmReceived) {
+          await artifacts.finalize(widget.localId);
+        } else {
+          await artifacts.savePayerStage(widget.localId);
+        }
+        message = 'Đã đồng bộ thao tác và lưu gói hồ sơ. PDF hợp đồng nguyên bản không đổi; thanh toán là ghi nhận riêng.';
+        attachment = null;
+        transferDeclared = false;
+        attachmentReviewed = false;
+        reference.clear();
+      } catch (_) {
+        message = 'Thao tác đã đồng bộ; gói hồ sơ chưa hoàn tất lưu/công bố. Làm mới hoặc dùng nút lưu hồ sơ để tiếp tục, không ký/báo chuyển lại.';
+      }
+    }
+  });
+  Future<void> pickAttachment() => run(() async {
+    final file = await FilePicker.pickFile(
+      type: FileType.custom,
+      allowedExtensions: ['png', 'jpg', 'jpeg', 'pdf'],
+    );
+    if (file == null) return;
+    final bytes = await file.readAsBytes();
+    if (bytes.isEmpty || bytes.length > TransferEvidence.maxAttachmentBytes) {
+      throw const FormatException('Chứng từ tối đa 1 MiB.');
+    }
+    TransferEvidence.mime(bytes);
+    attachment = bytes;
+    attachmentReviewed = false;
+  });
+  Future<void> readRecipient() => run(() async {
+    final value = await identity.identify(
+      context: IdentityContext.create(
+        ceremonyId: session.draft.fields['identityCeremonyId']!,
+        role: 'partyA',
+      ),
+      consent: consent,
+    );
+    if (!mounted || !widget.service.vault.unlocked) return;
+    recipientPreview = value;
+    if (bank['bankBin']!.text.isEmpty) bank['bankBin']!.text = '970436';
+    if (bank['accountName']!.text.isEmpty) {
+      bank['accountName']!.text = value.displayName;
+    }
+    reviewed = false;
+    message = 'Đã đọc danh tính mock A. Nhập và kiểm tra tài khoản nhận tiền trước khi khóa bản cuối.';
   });
   Future<void> download() => run(() async {
     final bundle = await artifacts.local(widget.localId);
@@ -198,7 +279,13 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
     }
     final current = session, local = record;
     final role = PartyRole.values.byName(local['role'] as String);
-    final payment = PaymentDetails.fromDraft(current.draft);
+    final payerProposal = WorkflowRules.isPayerProposal(current.draft);
+    final pendingRecipient =
+        payerProposal &&
+        !current.events.any((e) => (e['body'] as Map)['action'] == 'approve');
+    final payment = pendingRecipient
+        ? null
+        : PaymentDetails.fromDraft(current.draft);
     return Scaffold(
       appBar: AppBar(title: const Text('Chi tiết hợp đồng')),
       body: ListView(
@@ -214,6 +301,12 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
             message:
                 'Bản lưu gần nhất: ${local['lastSyncedAt'] ?? 'chưa đồng bộ'}. Hết hạn truy cập server: ${local['expiresAt'] ?? 'chưa có'}. Không dùng trạng thái cũ làm kết luận mới nhất.',
           ),
+          if (!payerProposal &&
+              WorkflowRules.creator(current.draft) == PartyRole.partyB)
+            const TrustNotice(
+              title: 'Hồ sơ B tạo ở phiên bản cũ',
+              message: 'Phiên này giữ nguyên quy tắc B ký trước, A ký sau. Chỉ đề xuất B tạo mới áp dụng A ký trước; không tự đổi thứ tự của hồ sơ đang có.',
+            ),
           if (busy) const LinearProgressIndicator(),
           if (message.isNotEmpty)
             Padding(
@@ -277,16 +370,49 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
             icon: Icons.account_balance,
             child: Column(
               children: [
-                SelectableText(payment.copyText),
+                SelectableText(
+                  payment?.copyText ??
+                      'Chờ A tự cung cấp tài khoản. B không cần nhập thay.',
+                ),
+                if (payerProposal &&
+                    current.draft.fields['partyAIdentitySummary'] != null)
+                  SelectableText(
+                    'A bổ sung: ${current.draft.fields['partyAIdentitySummary']}',
+                  ),
                 if (current.state == AgreementState.draft &&
                     role == PartyRole.partyA) ...[
                   const Text(
                     'A kiểm tra/sửa tài khoản nhận trước khi duyệt. Đây không phải xác nhận quyền sở hữu tài khoản từ ngân hàng.',
                   ),
+                  if (payerProposal) ...[
+                    CheckboxListTile(
+                      value: consent,
+                      onChanged: busy
+                          ? null
+                          : (v) => setState(() => consent = v ?? false),
+                      title: const Text(
+                        'Tôi đồng ý đọc danh tính mock của A; chưa có NFC thật.',
+                      ),
+                    ),
+                    OutlinedButton(
+                      onPressed: busy || !consent ? null : readRecipient,
+                      child: const Text(
+                        'Đọc CCCD mock của A trước khi điền tài khoản',
+                      ),
+                    ),
+                    if (recipientPreview != null)
+                      SelectableText(
+                        'Danh tính A: ${recipientPreview!.displayName} · ${recipientPreview!.documentNumberMasked}',
+                      ),
+                  ],
                   for (final name in bank.keys)
                     TextField(
                       controller: bank[name],
-                      enabled: !busy,
+                      enabled:
+                          !busy && (!payerProposal || recipientPreview != null),
+                      onChanged: payerProposal
+                          ? (_) => setState(() => reviewed = false)
+                          : null,
                       decoration: InputDecoration(
                         labelText: switch (name) {
                           'bankBin' => 'BIN ngân hàng',
@@ -305,10 +431,18 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                     ),
                   ),
                   FilledButton(
-                    onPressed: allows(WorkflowAction.approve) && reviewed
+                    onPressed:
+                        allows(WorkflowAction.approve) &&
+                            reviewed &&
+                            (!payerProposal ||
+                                (consent && recipientPreview != null))
                         ? () => act(WorkflowAction.approve)
                         : null,
-                    child: const Text('A duyệt và khóa đề xuất'),
+                    child: Text(
+                      payerProposal
+                          ? 'A xác nhận và khóa bản cuối'
+                          : 'A duyệt và khóa đề xuất',
+                    ),
                   ),
                 ],
               ],
@@ -320,6 +454,10 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
               title: 'Ký đúng vai trò bằng danh tính mock',
               message: identity.notice,
             ),
+            if (payerProposal && role == PartyRole.partyB)
+              const Text(
+                'A đã ký. Hãy kiểm tra danh tính A, ngân hàng, số tài khoản và tên nhận bên trên. Điều khoản B đề xuất được giữ nguyên; bạn ký trước khi mở VietQR.',
+              ),
             CheckboxListTile(
               value: reviewed,
               onChanged: (v) => setState(() => reviewed = v ?? false),
@@ -345,11 +483,122 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
             const SizedBox(height: 12),
             PaymentQrCard(draft: current.draft),
           ],
-          if (allows(WorkflowAction.reportTransfer))
+          if (allows(WorkflowAction.reportTransfer) && !payerProposal)
             FilledButton(
               onPressed: () => act(WorkflowAction.reportTransfer),
               child: const Text('B báo đã chuyển tiền (tự khai)'),
             ),
+          if (payerProposal && allows(WorkflowAction.reportTransfer)) ...[
+            const Text(
+              'Chuyển khoản ngoài CivilTrust rồi quay lại báo chuyển. Mở QR không đồng nghĩa thanh toán thành công. Chứng từ là tùy chọn, chưa được ngân hàng kiểm chứng.',
+            ),
+            TextField(
+              controller: reference,
+              maxLength: 200,
+              decoration: const InputDecoration(
+                labelText: 'Mã tham chiếu giao dịch (không bắt buộc)',
+              ),
+            ),
+            OutlinedButton(
+              onPressed: busy ? null : pickAttachment,
+              child: const Text('Chọn chứng từ PNG/JPEG/PDF, tối đa 1 MiB'),
+            ),
+            if (attachment != null) ...[
+              if (TransferEvidence.mime(attachment!).startsWith('image/'))
+                Image.memory(
+                  attachment!,
+                  height: 180,
+                  errorBuilder: (_, error, stack) => const Text(
+                    'Ảnh không xem trước được; hãy bỏ tệp hoặc chọn ảnh khác.',
+                  ),
+                )
+              else
+                const Text(
+                  'Đã chọn PDF. Hãy kiểm tra và che dữ liệu nhạy cảm trước khi gửi.',
+                ),
+              TextButton(
+                onPressed: () => setState(() {
+                  attachment = null;
+                  attachmentReviewed = false;
+                }),
+                child: const Text('Bỏ chứng từ'),
+              ),
+              CheckboxListTile(
+                value: attachmentReviewed,
+                onChanged: (v) =>
+                    setState(() => attachmentReviewed = v ?? false),
+                title: const Text(
+                  'Tôi đã kiểm tra tệp và loại bỏ thông tin nhạy cảm không cần thiết. Tệp sẽ được chia sẻ mã hóa với A.',
+                ),
+              ),
+            ],
+            CheckboxListTile(
+              value: transferDeclared,
+              onChanged: (v) => setState(() => transferDeclared = v ?? false),
+              title: const Text(
+                'Tôi là B, đã thực hiện chuyển khoản; không chỉ mở màn hình QR.',
+              ),
+            ),
+            FilledButton(
+              onPressed:
+                  transferDeclared &&
+                      (attachment == null || attachmentReviewed) &&
+                      record['signedArtifactReady'] == true
+                  ? () => act(WorkflowAction.reportTransfer)
+                  : null,
+              child: const Text(
+                'B gửi thông báo chuyển khoản và lưu bằng chứng',
+              ),
+            ),
+          ],
+          if (payerProposal && current.transfer != null) ...[
+            Text(
+              'B tự báo chuyển: ${current.transfer!['reference']} · ${current.transfer!['reportedAt']}',
+            ),
+            Text(
+              current.transfer!['attachment'] == null
+                  ? 'Không có chứng từ đính kèm. Chờ A kiểm tra ngân hàng.'
+                  : 'Có chứng từ do B cung cấp; chưa được ngân hàng kiểm chứng.',
+            ),
+            if (current.transfer!['attachment'] is Map &&
+                ((current.transfer!['attachment'] as Map)['mime'] as String)
+                    .startsWith('image/'))
+              Image.memory(
+                Uint8List.fromList(
+                  base64UrlDecodeNoPadding(
+                    (current.transfer!['attachment'] as Map)['bytes'] as String,
+                  ),
+                ),
+                height: 180,
+                errorBuilder: (_, error, stack) =>
+                    const Text('Không xem trước được ảnh chứng từ.'),
+              ),
+            if (current.transfer!['attachment'] is Map)
+              OutlinedButton(
+                onPressed: busy
+                    ? null
+                    : () => run(() async {
+                        final data = current.transfer!['attachment'] as Map;
+                        await FileSaver.instance.saveFile(
+                          name: 'civiltrust-transfer',
+                          bytes: Uint8List.fromList(
+                            base64UrlDecodeNoPadding(data['bytes'] as String),
+                          ),
+                          fileExtension: data['mime'] == 'application/pdf'
+                              ? 'pdf'
+                              : data['mime'] == 'image/png'
+                              ? 'png'
+                              : 'jpg',
+                          mimeType: data['mime'] == 'application/pdf'
+                              ? MimeType.pdf
+                              : data['mime'] == 'image/png'
+                              ? MimeType.png
+                              : MimeType.jpeg,
+                        );
+                      }),
+                child: const Text('Tải chứng từ B cung cấp'),
+              ),
+          ],
           if (allows(WorkflowAction.confirmReceived)) ...[
             CheckboxListTile(
               value: received,
@@ -371,6 +620,56 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
               child: const Text('A xác nhận đã nhận tiền'),
             ),
           ],
+          if (payerProposal &&
+              role == PartyRole.partyA &&
+              (allows(WorkflowAction.decline) ||
+                  allows(WorkflowAction.reportIssue))) ...[
+            TextField(
+              controller: feedback,
+              maxLength: 500,
+              decoration: const InputDecoration(
+                labelText: 'Phản hồi cho B (không ghi dữ liệu nhạy cảm)',
+              ),
+            ),
+            if (allows(WorkflowAction.requestChanges))
+              OutlinedButton(
+                onPressed: () => act(WorkflowAction.requestChanges),
+                child: const Text('Đề nghị B tạo bản chỉnh sửa'),
+              ),
+            if (allows(WorkflowAction.decline))
+              OutlinedButton(
+                onPressed: () => act(WorkflowAction.decline),
+                child: const Text('Từ chối đề xuất này'),
+              ),
+            if (allows(WorkflowAction.reportIssue) && current.response == null)
+              OutlinedButton(
+                onPressed: () => act(WorkflowAction.reportIssue),
+                child: const Text(
+                  'Chưa thấy tiền / có sai lệch — chưa xác nhận nhận đủ',
+                ),
+              ),
+          ],
+          if (current.response != null)
+            Text('Phản hồi A: ${current.response!['note']}'),
+          if (payerProposal && current.partyA != null && current.partyB != null)
+            OutlinedButton(
+              onPressed: busy
+                  ? null
+                  : () => run(() async {
+                      if (current.state == AgreementState.paymentConfirmed &&
+                          role == PartyRole.partyA &&
+                          local['finalized'] != true) {
+                        await artifacts.finalize(widget.localId);
+                      } else {
+                        await artifacts.savePayerStage(widget.localId);
+                      }
+                      message =
+                          'Đã lưu gói bằng chứng; PDF nguyên bản không đổi.';
+                    }),
+              child: const Text(
+                'Lưu / khôi phục gói hồ sơ ở trạng thái hiện tại',
+              ),
+            ),
           const SizedBox(height: 12),
           Text(
             'Chữ ký A: ${current.partyA == null ? 'chưa có' : 'có, đã kiểm kỹ thuật'} · B: ${current.partyB == null ? 'chưa có' : 'có, đã kiểm kỹ thuật'}',
@@ -388,7 +687,11 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                       await artifacts.finalize(widget.localId);
                       message = 'Đã lưu nguyên bản ZIP và công bố cho đối tác. SCT/proof kiểm riêng.';
                     }),
-              child: const Text('A tạo và lưu PDF/ZIP nguyên bản'),
+              child: Text(
+                payerProposal
+                    ? 'A lưu và công bố xác nhận nhận tiền'
+                    : 'A tạo và lưu PDF/ZIP nguyên bản',
+              ),
             ),
           if (local['finalized'] == true)
             OutlinedButton(

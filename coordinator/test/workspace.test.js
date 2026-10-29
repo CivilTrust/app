@@ -46,3 +46,38 @@ for (const creator of ['partyA','partyB']) test(`${creator} creates and signs fi
   assert.equal(snapshot.phase,'paymentConfirmed'); assert.equal(snapshot.version,version); assert.equal(snapshot.creatorRole,creator);
   assert.equal((await fetch(`${url}/v1/sessions/${id}`,{headers:{authorization:`Bearer ${ownerToken}`}})).status,404);
 });
+
+test('new B proposal: A signs first, original artifact required and immutable, payment stays role-scoped', async () => {
+  const keys={partyA:pair(),partyB:pair()},id=token(),ownerToken=token(),participantToken=token();
+  const packet={domain:'civiltrust-workspace-create/1',id,creatorRole:'partyB',publicKey:keys.partyB.public,workflowProfile:'payer-proposal/1'};
+  const body={...packet,ownerToken,participantToken,createSignature:sign(null,Buffer.from(canon(packet)),keys.partyB.privateKey).toString('base64url'),encryptedPayload:box()};
+  assert.equal((await post('/v2/sessions',body)).status,201);
+  assert.equal((await post('/v2/sessions',{...body,workflowProfile:'creator-independent/1'})).status,403);
+  let version=1;
+  const act=async(role,action,artifact=false)=>{
+    const encryptedPayload=box(),encryptedArtifact=artifact?box():undefined;
+    const p={domain:'civiltrust-workspace-request/1',sessionId:id,role,action,expectedVersion:version,draftDigest:'0x'+'a'.repeat(64),payloadSha256:sha(encryptedPayload),artifactSha256:encryptedArtifact?sha(encryptedArtifact):''};
+    const response=await post(`/v2/sessions/${id}/actions`,{packet:p,publicKey:keys[role].public,signature:sign(null,Buffer.from(canon(p)),keys[role].privateKey).toString('base64url'),encryptedPayload,encryptedArtifact},role==='partyB'?ownerToken:participantToken);
+    if(response.status===200)version++;
+    return response;
+  };
+  assert.equal((await act('partyB','approve')).status,400);
+  assert.equal((await act('partyA','approve')).status,200);
+  assert.equal((await act('partyB','sign')).status,400);
+  assert.equal((await act('partyA','sign')).status,200);
+  assert.equal((await act('partyB','sign')).status,200);
+  assert.equal((await act('partyB','reportTransfer')).status,409);
+  assert.equal((await act('partyA','publishSignedArtifact',true)).status,409);
+  assert.equal((await act('partyB','publishSignedArtifact',true)).status,200);
+  assert.equal((await act('partyB','publishSignedArtifact',true)).status,409);
+  assert.equal((await fetch(`${url}/v2/sessions/${id}/artifact`,{headers:{authorization:`Bearer ${participantToken}`}})).status,200);
+  assert.equal((await act('partyA','publishArtifact',true)).status,403);
+  assert.equal((await act('partyA','reportTransfer')).status,400);
+  assert.equal((await act('partyB','reportTransfer')).status,200);
+  assert.equal((await act('partyA','reportIssue')).status,200);
+  assert.equal((await act('partyA','reportIssue')).status,409);
+  assert.equal((await act('partyB','confirmReceived')).status,400);
+  assert.equal((await act('partyA','confirmReceived')).status,200);
+  assert.equal((await act('partyB','publishArtifact',true)).status,403);
+  assert.equal((await act('partyA','publishArtifact',true)).status,200);
+});

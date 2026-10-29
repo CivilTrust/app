@@ -11,6 +11,9 @@ import '../../core/encoding/encoding_utils.dart';
 import '../../core/formatting/display_formatters.dart';
 import '../../core/models/agreement.dart';
 import 'evidence_manifest.dart';
+import '../workspace/workflow_rules.dart';
+import '../workspace/payer_proposal.dart';
+import '../payment/payment_details.dart';
 
 class ArtifactBundle {
   const ArtifactBundle({
@@ -35,9 +38,10 @@ class ArtifactService {
   final Future<pw.Font> Function() _boldFont;
 
   Future<ArtifactBundle> build(SigningSession session) async {
+    final payer = WorkflowRules.isPayerProposal(session.draft);
     if (session.partyA == null ||
         session.partyB == null ||
-        session.payment == null) {
+        (!payer && session.payment == null)) {
       throw StateError('Cần đủ hai chữ ký và xác nhận thanh toán.');
     }
     // G1 permits synthetic demo data only. A real identity export needs a
@@ -57,14 +61,20 @@ class ArtifactService {
     final pdf = await _buildPdf(session, evidenceHash);
     final documentHash = _hash.keccakHex(pdf);
     final evidence = EvidenceManifest(
-      schema:
-          session.partyA!.schemaVersion == 2 &&
-              session.partyB!.schemaVersion == 2
+      schema: payer
+          ? EvidenceManifest.payerSchema
+          : session.partyA!.schemaVersion == 2 &&
+                session.partyB!.schemaVersion == 2
           ? EvidenceManifest.currentSchema
           : EvidenceManifest.legacySchema,
       documentHash: documentHash,
       evidenceHash: evidenceHash,
-      session: session.copyWith(state: AgreementState.committedPendingAnchor),
+      session: payer
+          ? session
+          : session.copyWith(state: AgreementState.committedPendingAnchor),
+      signedSnapshotHash: payer
+          ? _hash.canonicalObjectHash(signedSnapshot(session).toJson())
+          : null,
     );
     final evidenceBytes = utf8.encode(
       const JsonEncoder.withIndent('  ').convert(evidence.toJson()),
@@ -87,6 +97,7 @@ class ArtifactService {
       session: bundle.evidence.session,
       signedCommitment: sct,
       merkleProof: bundle.evidence.merkleProof,
+      signedSnapshotHash: bundle.evidence.signedSnapshotHash,
     );
     final bytes = utf8.encode(
       const JsonEncoder.withIndent('  ').convert(evidence.toJson()),
@@ -145,13 +156,24 @@ class ArtifactService {
             session.partyB!.identity,
             session.partyB!.signedAt,
           ),
-          pw.Text('Thanh toán/nhận tiền: ${session.payment!.reference}'),
-          pw.Text(
-            'Xác nhận lúc: ${session.payment!.confirmedAt.toUtc().toIso8601String()}',
-          ),
+          if (WorkflowRules.isPayerProposal(d)) ...[
+            pw.Text(
+              'Thông tin nhận tiền A:\n${PaymentDetails.fromDraft(d).copyText}',
+            ),
+            pw.Text(
+              'Hồ sơ đủ hai chữ ký. Thanh toán được ghi nhận riêng trong evidence; PDF này không xác nhận đã nhận tiền.',
+            ),
+          ] else ...[
+            pw.Text('Thanh toán/nhận tiền: ${session.payment!.reference}'),
+            pw.Text(
+              'Xác nhận lúc: ${session.payment!.confirmedAt.toUtc().toIso8601String()}',
+            ),
+          ],
           pw.Divider(),
           pw.Text('Mã nội dung đã ký: ${session.frozenDigest}'),
-          pw.Text('Mã evidence trước khi gửi Notary: $evidenceHash'),
+          pw.Text(
+            '${WorkflowRules.isPayerProposal(d) ? 'Mã hồ sơ tại thời điểm đủ hai chữ ký' : 'Mã evidence trước khi gửi Notary'}: $evidenceHash',
+          ),
           pw.SizedBox(height: 8),
           pw.Text(
             'Bản PDF này là hiện vật bất biến. SCT và Merkle proof được lưu trong '
@@ -239,11 +261,25 @@ class ArtifactService {
     if (actual != manifest.documentHash) {
       throw const FormatException('Hash agreement.pdf không khớp evidence.');
     }
+    final payer = manifest.schema == EvidenceManifest.payerSchema;
+    if (payer != WorkflowRules.isPayerProposal(manifest.session.draft)) {
+      throw const FormatException('Evidence schema không khớp workflow.');
+    }
+    if (payer &&
+        manifest.signedSnapshotHash !=
+            _hash.canonicalObjectHash(
+              signedSnapshot(manifest.session).toJson(),
+            )) {
+      throw const FormatException('Snapshot hợp đồng đã ký bị thay đổi.');
+    }
     final actualEvidence = _hash.keccakHex(
       utf8.encode(
         canonicalJson(
-          manifest.session
-              .copyWith(state: AgreementState.paymentConfirmed)
+          (payer
+                  ? manifest.session
+                  : manifest.session.copyWith(
+                      state: AgreementState.paymentConfirmed,
+                    ))
               .toJson(),
         ),
       ),
@@ -252,6 +288,42 @@ class ArtifactService {
       throw const FormatException('Evidence đã bị thay đổi.');
     }
     return manifest;
+  }
+
+  /// New evidence versions retain the exact original PDF and its hash.
+  ArtifactBundle updatePayerEvidence(
+    ArtifactBundle original,
+    SigningSession current,
+  ) {
+    if (!WorkflowRules.isPayerProposal(current.draft) ||
+        original.evidence.signedSnapshotHash !=
+            _hash.canonicalObjectHash(signedSnapshot(current).toJson())) {
+      throw const FormatException('Không phải cùng bản hợp đồng đã ký.');
+    }
+    final evidence = EvidenceManifest(
+      schema: EvidenceManifest.payerSchema,
+      documentHash: original.evidence.documentHash,
+      evidenceHash: _hash.canonicalObjectHash(current.toJson()),
+      session: current,
+      signedSnapshotHash: original.evidence.signedSnapshotHash,
+      signedCommitment: original.evidence.signedCommitment,
+      merkleProof: original.evidence.merkleProof,
+    );
+    final archive = Archive()
+      ..addFile(_storedFile('agreement.pdf', original.pdf))
+      ..addFile(
+        _storedFile(
+          'evidence.civiltrust.json',
+          utf8.encode(
+            const JsonEncoder.withIndent('  ').convert(evidence.toJson()),
+          ),
+        ),
+      );
+    return ArtifactBundle(
+      pdf: original.pdf,
+      evidence: evidence,
+      zip: Uint8List.fromList(ZipEncoder().encodeBytes(archive)),
+    );
   }
 
   ArtifactBundle restoreBundle(Uint8List bytes) {

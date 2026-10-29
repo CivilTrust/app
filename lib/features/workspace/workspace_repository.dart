@@ -20,6 +20,7 @@ class WorkspaceSnapshot {
     this.role,
     this.finalized,
     this.keys,
+    this.signedArtifactReady,
   );
   final SigningSession session;
   final int version;
@@ -27,6 +28,7 @@ class WorkspaceSnapshot {
   final PartyRole role;
   final bool finalized;
   final Map<String, dynamic> keys;
+  final bool signedArtifactReady;
 }
 
 class WorkspaceRepository {
@@ -73,6 +75,8 @@ class WorkspaceRepository {
       'id': record['sessionId'],
       'creatorRole': record['role'],
       'publicKey': await actionKey.publicKey,
+      if (WorkflowRules.isPayerProposal(session.draft))
+        'workflowProfile': WorkflowRules.payerProfile,
     };
     final data = await _data(
       await _client
@@ -98,7 +102,11 @@ class WorkspaceRepository {
         token: record['token'] as String,
         encryptionKey: base64UrlDecodeNoPadding(record['key'] as String),
         isOwner: record['isOwner'] as bool,
-        workflowProfile: WorkflowRules.profile,
+        workflowProfile: record['session'] is Map
+            ? ((record['session'] as Map)['draft']
+                      as Map)['fields']['workflowProfile']
+                  as String?
+            : null,
       );
   Map<String, String> _headers(SessionCapabilities c) => {
     'authorization': 'Bearer ${c.token}',
@@ -123,6 +131,8 @@ class WorkspaceRepository {
       ),
     );
     if (WorkflowRules.creator(session.draft).name != data['creatorRole'] ||
+        (data['workflowProfile'] ?? WorkflowRules.profile) !=
+            session.draft.fields['workflowProfile'] ||
         data['phase'] != session.state.name ||
         data['frozenDigest'] != session.frozenDigest) {
       throw const FormatException(
@@ -145,6 +155,7 @@ class WorkspaceRepository {
       PartyRole.values.byName(data['role'] as String),
       data['finalized'] as bool,
       keys,
+      data['signedArtifactReady'] == true,
     );
   }
 

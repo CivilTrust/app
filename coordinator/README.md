@@ -23,6 +23,14 @@ Requires Node.js >=24. The server/demo uses SQLite at `app/.demo/coordinator.sql
 
 Capabilities are not legal identity. The initial owner knows the participant invitation token; action signatures and mock identity do not prove two distinct real people. Trusted CCCD/NFC verification remains separate future work. Never log tokens, seeds, decrypted agreements or invitation fragments.
 
+### New B proposals: `payer-proposal/1`
+
+New B-created proposals include `workflowProfile` in the signed creation packet. The server pins this value; omission preserves `creator-independent/1` for existing clients. The new profile only accepts creator B. A approves/freezes, A signs first and B signs second; payment direction remains B to A. Existing A/B records are not migrated.
+
+`publishSignedArtifact` is allowed only for B at `bothSigned`, once. It stores the encrypted original PDF/ZIP before payment without closing the session. B cannot report transfer before that upload is recorded. Either capability may retrieve it via the existing artifact route. Later `publishArtifact` is still only A after receipt; the final archive is returned in preference to the original. Clients verify that its PDF and signed-snapshot hash match the original contract and payment events.
+
+A may `requestChanges` or `decline` an unsigned proposal (terminal states requiring a replacement proposal); `reportIssue` records one unresolved payment issue without changing `paymentPending` to paid. Client-side evidence validation binds response/receipt content to signed event details. The server remains opaque and does not read bank receipts or independently verify money movement. Deploy the updated app and coordinator together.
+
 ## CORS and phone demo
 
 Default development CORS allows HTTP loopback origins only. Set

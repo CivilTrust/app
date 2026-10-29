@@ -8,6 +8,8 @@ import '../artifacts/artifact_service.dart';
 import '../notary/notary_client.dart';
 import '../notary/sct_verifier.dart';
 import 'workspace_service.dart';
+import 'workflow_rules.dart';
+import 'payer_proposal.dart';
 
 class WorkspaceArtifacts {
   WorkspaceArtifacts(this.workspace, this.config, {ArtifactService? artifacts})
@@ -27,6 +29,22 @@ class WorkspaceArtifacts {
       requirePartyB: true,
     );
     final current = workspace.session(workspace.record(id));
+    if (WorkflowRules.isPayerProposal(current.draft)) {
+      final archived = bundle.evidence.session;
+      if (bundle.evidence.documentHash != archive['documentHash'] ||
+          bundle.evidence.signedSnapshotHash !=
+              const HashService().canonicalObjectHash(
+                signedSnapshot(current).toJson(),
+              ) ||
+          archived.events.length > current.events.length ||
+          canonicalJson(archived.events) !=
+              canonicalJson(
+                current.events.take(archived.events.length).toList(),
+              )) {
+        throw const FormatException('ZIP không khớp lịch sử hợp đồng này.');
+      }
+      return bundle;
+    }
     if (bundle.evidence.documentHash != archive['documentHash'] ||
         canonicalJson(
               bundle.evidence.session
@@ -54,7 +72,13 @@ class WorkspaceArtifacts {
       throw StateError('Chỉ bên nhận A tạo hồ sơ cuối.');
     }
     if (record['finalized'] == true) {
+      if (WorkflowRules.isPayerProposal(workspace.session(record).draft)) {
+        return record['archiveFinalized'] == true ? local(id) : fetch(id);
+      }
       return record['archive'] == null ? fetch(id) : local(id);
+    }
+    if (WorkflowRules.isPayerProposal(workspace.session(record).draft)) {
+      return _finalizePayer(id);
     }
     if (record['pending'] != null) {
       throw StateError(
@@ -116,14 +140,137 @@ class WorkspaceArtifacts {
     return bundle;
   }
 
+  Map<String, dynamic> _archive(ArtifactBundle bundle, String note) => {
+    'zip': base64UrlNoPadding(bundle.zip),
+    'documentHash': bundle.evidence.documentHash,
+    'note': note,
+  };
+
+  /// B persists the original before publish. Both roles derive later evidence
+  /// snapshots from these same PDF bytes, never from a second PDF render.
+  Future<ArtifactBundle> savePayerStage(String id) async {
+    var record = workspace.record(id);
+    if (record['finalized'] == true) {
+      return record['archiveFinalized'] == true ? local(id) : fetch(id);
+    }
+    final current = workspace.session(record);
+    if (!WorkflowRules.isPayerProposal(current.draft) ||
+        current.partyA == null ||
+        current.partyB == null) {
+      throw StateError('Chưa đủ hai chữ ký.');
+    }
+    await workspace.validator.validate(current, requirePartyB: true);
+    ArtifactBundle original;
+    if (record['signedArchive'] != null) {
+      original = await _checked(
+        id,
+        Map<String, dynamic>.from(record['signedArchive'] as Map),
+      );
+    } else if (record['signedArtifactReady'] == true ||
+        record['finalized'] == true) {
+      workspace.ensureEndpoint(record);
+      original = await _checked(
+        id,
+        await workspace.repository.artifact(record),
+      );
+    } else {
+      if (record['role'] != 'partyB') {
+        throw StateError(
+          'Chờ B lưu bản PDF nguyên gốc; không tạo bản PDF khác trên thiết bị A.',
+        );
+      }
+      original = await artifacts.build(signedSnapshot(current));
+    }
+    final base = _archive(
+      original,
+      'PDF hợp đồng đã ký nguyên bản; không phải xác nhận thanh toán.',
+    );
+    await workspace.vault.put(id, {
+      ...workspace.record(id),
+      'signedArchive': base,
+    });
+    if (record['signedArtifactReady'] != true && record['role'] == 'partyB') {
+      await workspace.publishSigned(id, Map<String, Object?>.from(base));
+    }
+    record = workspace.record(id);
+    final result = artifacts.updatePayerEvidence(
+      original,
+      workspace.session(record),
+    );
+    await workspace.vault.put(id, {
+      ...record,
+      'archive': _archive(
+        result,
+        'Gói bằng chứng tại trạng thái hiện tại; PDF không đổi. Chứng từ B và xác nhận A là tự khai. Chưa có SCT/proof nếu không đính kèm.',
+      ),
+    });
+    return result;
+  }
+
+  Future<ArtifactBundle> _finalizePayer(String id) async {
+    final record = workspace.record(id);
+    if (workspace.session(record).state != AgreementState.paymentConfirmed ||
+        record['pending'] != null) {
+      throw StateError(
+        'Cần A xác nhận nhận đủ và làm mới trước khi công bố cuối.',
+      );
+    }
+    var result = await savePayerStage(id);
+    String note =
+        'PDF nguyên bản; A tự xác nhận nhận tiền. Notary đã tắt, không có SCT.';
+    if (config.notaryEnabled) {
+      try {
+        final sct = await NotaryClient(config.notaryBaseUrl)
+            .submit(result.evidence.documentHash);
+        final status = const SctVerifier()
+            .verify(
+              sct,
+              documentHash: result.evidence.documentHash,
+              policy: config.sctTrustPolicy,
+            )
+            .status;
+        if (status == SctVerificationStatus.invalid ||
+            status == SctVerificationStatus.unsupported) {
+          throw const FormatException('SCT không hợp lệ.');
+        }
+        result = artifacts.attachNotary(result, sct.toJson());
+        note = status == SctVerificationStatus.valid
+            ? 'SCT hợp lệ theo trust policy; thanh toán do A xác nhận.'
+            : 'Có SCT, chưa cấu hình trust policy; không khẳng định đã neo.';
+      } catch (_) {
+        note = 'Chưa có SCT kiểm chứng được; giữ hồ sơ offline, không khẳng định đã neo.';
+      }
+    }
+    final archive = _archive(result, note);
+    await workspace.vault.put(id, {
+      ...workspace.record(id),
+      'archive': archive,
+    });
+    await workspace.publish(id, Map<String, Object?>.from(archive));
+    await workspace.vault.put(id, {
+      ...workspace.record(id),
+      'archiveFinalized': true,
+    });
+    return result;
+  }
+
   Future<ArtifactBundle> fetch(String id) async {
     final record = workspace.record(id);
     workspace.ensureEndpoint(record);
     final archive = await workspace.repository.artifact(record);
     final bundle = await _checked(id, archive);
+    if (WorkflowRules.isPayerProposal(bundle.evidence.session.draft) &&
+        record['finalized'] == true &&
+        canonicalJson(bundle.evidence.session.toJson()) !=
+            canonicalJson(workspace.session(record).toJson())) {
+      throw const FormatException(
+        'Gói cuối chưa khớp trạng thái xác nhận nhận tiền.',
+      );
+    }
     await workspace.vault.put(id, {
       ...workspace.record(id),
       'archive': archive,
+      'archiveFinalized': record['finalized'] == true,
     });
     return bundle;
   }

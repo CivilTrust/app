@@ -2,6 +2,7 @@ import { createHash, randomBytes, timingSafeEqual, createPublicKey, verify } fro
 import { corsPolicy } from './cors.js';
 
 const profile = 'creator-independent/1';
+const payerProfile = 'payer-proposal/1';
 const hash = value => createHash('sha256').update(value).digest();
 const canonical = value => JSON.stringify(Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])));
 const digest = value => '0x' + hash(canonical(value)).toString('hex');
@@ -18,10 +19,13 @@ async function readBody(request) {
   for await (const chunk of request) { length += chunk.length; if (length > 16 * 1024 * 1024) throw new Error('Payload too large'); chunks.push(chunk); }
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 }
-function next(phase, role, creator, action) {
+function next(phase, role, creator, action, payer = false) {
+  const first = payer ? 'partyA' : creator;
   if (action === 'approve' && phase === 'draft' && role === 'partyA') return 'contentFrozen';
-  if (action === 'sign' && phase === 'contentFrozen' && role === creator) return creator === 'partyA' ? 'partyASigned' : 'partyBSigned';
-  if (action === 'sign' && role !== creator && ((phase === 'partyASigned' && creator === 'partyA') || (phase === 'partyBSigned' && creator === 'partyB'))) return 'bothSigned';
+  if (action === 'sign' && phase === 'contentFrozen' && role === first) return first === 'partyA' ? 'partyASigned' : 'partyBSigned';
+  if (action === 'sign' && role !== first && ((phase === 'partyASigned' && first === 'partyA') || (phase === 'partyBSigned' && first === 'partyB'))) return 'bothSigned';
+  if (payer && phase === 'draft' && role === 'partyA' && ['requestChanges','decline'].includes(action)) return action === 'decline' ? 'declined' : 'changesRequested';
+  if (payer && phase === 'paymentPending' && role === 'partyA' && action === 'reportIssue') return phase;
   if (action === 'reportTransfer' && role === 'partyB' && phase === 'bothSigned') return 'paymentPending';
   if (action === 'confirmReceived' && role === 'partyA' && phase === 'paymentPending') return 'paymentConfirmed';
   throw new Error('Action not allowed for this role/state');
@@ -43,20 +47,23 @@ export function createWorkspaceCoordinator({store, legacy, allowedOrigins = null
       if (url.pathname === '/v2/sessions' && request.method === 'POST') {
         for (const id of store.keys()) { if (store.get(id).expiresAt <= now()) store.delete(id); }
         const body = await readBody(request);
+        const workflowProfile = body.workflowProfile || profile;
+        if (![profile,payerProfile].includes(workflowProfile) || (workflowProfile === payerProfile && body.creatorRole !== 'partyB')) return reply(400,{error:'Unsupported workflow profile'});
         if (!['partyA','partyB'].includes(body.creatorRole) || !validBox(body.encryptedPayload) ||
             ![body.id,body.ownerToken,body.participantToken].every(value => typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value)) || body.ownerToken === body.participantToken) return reply(400, {error:'Invalid workflow proposal'});
         keyObject(body.publicKey);
         const packet = {domain:'civiltrust-workspace-create/1',id:body.id,creatorRole:body.creatorRole,publicKey:body.publicKey};
+        if (body.workflowProfile) packet.workflowProfile = body.workflowProfile;
         if (body.domain !== packet.domain || !verify(null,Buffer.from(canonical(packet)),keyObject(body.publicKey),Buffer.from(body.createSignature || '', 'base64url'))) return reply(403,{error:'Invalid create signature'});
         const ownerToken = body.ownerToken, participantToken = body.participantToken, id = body.id;
         const existing = store.get(id);
         if (existing) {
-          if (existing.ownerKey !== body.publicKey || existing.creatorRole !== body.creatorRole ||
+          if (existing.workflowProfile !== workflowProfile || existing.ownerKey !== body.publicKey || existing.creatorRole !== body.creatorRole ||
               !timingSafeEqual(existing.ownerTokenHash,tokenHash(ownerToken)) || !timingSafeEqual(existing.participantTokenHash,tokenHash(participantToken))) return reply(409,{error:'Creation conflict'});
           return reply(200,{data:{id,version:existing.version,expiresAt:existing.expiresAt}});
         }
         if (store.size >= maxSessions) return reply(503, {error:'Session capacity reached'});
-        const row = {id, workflowProfile:profile, creatorRole:body.creatorRole, phase:'draft', version:1,
+        const row = {id, workflowProfile, creatorRole:body.creatorRole, phase:'draft', version:1,
           ownerTokenHash:tokenHash(ownerToken), participantTokenHash:tokenHash(participantToken),
           ownerKey:body.publicKey, participantKey:null, encryptedPayload:body.encryptedPayload,
           frozenDigest:null, finalized:false, createdAt:now(), expiresAt:now()+7*86400000};
@@ -66,7 +73,7 @@ export function createWorkspaceCoordinator({store, legacy, allowedOrigins = null
       const match = url.pathname.match(/^\/v2\/sessions\/([A-Za-z0-9_-]+)(?:\/(actions|artifact))?$/);
       if (!match) return reply(404,{error:'Route not found'});
       const [,id,route] = match; const row = store.get(id);
-      if (!row || row.workflowProfile !== profile || row.expiresAt <= now()) {
+      if (!row || ![profile,payerProfile].includes(row.workflowProfile) || row.expiresAt <= now()) {
         if (row?.expiresAt <= now()) store.delete(id);
         return reply(404,{error:'Session not found or expired'});
       }
@@ -77,9 +84,10 @@ export function createWorkspaceCoordinator({store, legacy, allowedOrigins = null
       const keys = {[row.creatorRole]:row.ownerKey, [row.creatorRole === 'partyA' ? 'partyB' : 'partyA']:row.participantKey};
       if (!route && request.method === 'GET') return reply(200,{data:{id,creatorRole:row.creatorRole,role,phase:row.phase,version:row.version,
         finalized:row.finalized,expiresAt:row.expiresAt,encryptedPayload:row.encryptedPayload,keys,
-        frozenDigest:row.frozenDigest,artifactReady:!!row.encryptedArtifact}});
+        frozenDigest:row.frozenDigest,artifactReady:!!row.encryptedArtifact,workflowProfile:row.workflowProfile,signedArtifactReady:!!row.signedArtifact}});
       if (route === 'artifact' && request.method === 'GET') {
-        return row.encryptedArtifact ? reply(200,{data:{encryptedArtifact:row.encryptedArtifact}}) : reply(404,{error:'Artifact not published'});
+        const artifact=row.encryptedArtifact || row.signedArtifact;
+        return artifact ? reply(200,{data:{encryptedArtifact:artifact}}) : reply(404,{error:'Artifact not published'});
       }
       if (route !== 'actions' || request.method !== 'POST') return reply(405,{error:'Method not allowed'});
       const body = await readBody(request), packet = body.packet;
@@ -92,12 +100,18 @@ export function createWorkspaceCoordinator({store, legacy, allowedOrigins = null
           !/^0x[0-9a-f]{64}$/.test(packet.draftDigest)) return reply(400,{error:'Encrypted action payload mismatch'});
       if (row.frozenDigest && packet.draftDigest !== row.frozenDigest) return reply(409,{error:'Frozen draft cannot change'});
       if (row.finalized) return reply(409,{error:'Session already finalized'});
-      if (packet.action === 'publishArtifact') {
+      if (packet.action === 'publishSignedArtifact') {
+        if(row.workflowProfile!==payerProfile || role!=='partyB' || row.phase!=='bothSigned' || row.signedArtifact || !validBox(body.encryptedArtifact))return reply(409,{error:'Original signed artifact is immutable or not allowed'});
+        row.signedArtifact=body.encryptedArtifact;
+      } else if (packet.action === 'publishArtifact') {
         if (role !== 'partyA' || row.phase !== 'paymentConfirmed' || !validBox(body.encryptedArtifact)) return reply(403,{error:'Only payee A can publish after receipt confirmation'});
         row.encryptedArtifact = body.encryptedArtifact; row.finalized = true; row.expiresAt = now()+30*86400000;
       } else {
         if (body.encryptedArtifact) return reply(400,{error:'Artifact requires publish action'});
-        row.phase = next(row.phase,role,row.creatorRole,packet.action);
+        if(row.workflowProfile===payerProfile && packet.action==='reportTransfer' && !row.signedArtifact)return reply(409,{error:'Save original signed artifact before reporting transfer'});
+        if(packet.action==='reportIssue' && row.paymentIssue)return reply(409,{error:'Payment issue already recorded'});
+        row.phase = next(row.phase,role,row.creatorRole,packet.action,row.workflowProfile===payerProfile);
+        if(packet.action==='reportIssue')row.paymentIssue=true;
       }
       if (packet.action === 'approve') row.frozenDigest = packet.draftDigest;
       if (!owner) row.participantKey = publicKey;

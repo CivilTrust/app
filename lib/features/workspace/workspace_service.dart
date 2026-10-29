@@ -15,6 +15,7 @@ import 'agreement_vault.dart';
 import 'workflow_engine.dart';
 import 'workflow_event.dart';
 import 'workflow_rules.dart';
+import 'payer_proposal.dart';
 import 'workspace_repository.dart';
 
 class WorkspaceService {
@@ -64,6 +65,8 @@ class WorkspaceService {
       'finalized': false,
       'endpoint': repository.baseUrl,
       'sourceFormId': ?formId,
+      if (WorkflowRules.isPayerProposal(draft))
+        'proposalTermsHash': proposalTermsDigest(draft),
     };
     await vault.put(saved['localId'] as String, saved);
     await repository.create(saved);
@@ -83,7 +86,10 @@ class WorkspaceService {
   Future<Map<String, dynamic>> join(SessionCapabilities invitation) async {
     if (!vault.unlocked) throw StateError('Mở kho trước khi tham gia.');
     if (invitation.isOwner ||
-        invitation.workflowProfile != WorkflowRules.profile) {
+        !{
+          WorkflowRules.profile,
+          WorkflowRules.payerProfile,
+        }.contains(invitation.workflowProfile)) {
       throw const FormatException('Không phải lời mời workflow mới.');
     }
     final key = await WorkflowKey.create();
@@ -113,6 +119,29 @@ class WorkspaceService {
     Map<String, dynamic> local,
     WorkspaceSnapshot snapshot,
   ) async {
+    if (local['session'] is Map) {
+      final cached = session(local);
+      if (cached.draft.id != snapshot.session.draft.id ||
+          (cached.frozenDigest != null &&
+              cached.frozenDigest != snapshot.session.frozenDigest) ||
+          cached.events.length > snapshot.session.events.length ||
+          canonicalJson(cached.events) !=
+              canonicalJson(
+                snapshot.session.events.take(cached.events.length).toList(),
+              )) {
+        throw const FormatException(
+          'Snapshot không nối tiếp lịch sử hợp đồng; giữ nguyên bản đã lưu.',
+        );
+      }
+    }
+    if (WorkflowRules.isPayerProposal(snapshot.session.draft) &&
+        local['proposalTermsHash'] != null &&
+        local['proposalTermsHash'] !=
+            proposalTermsDigest(snapshot.session.draft)) {
+      throw const FormatException(
+        'Điều khoản B đề xuất đã thay đổi; không nhận snapshot này.',
+      );
+    }
     final key = WorkflowKey(
       base64UrlDecodeNoPadding(local['actionSeed'] as String),
     );
@@ -128,6 +157,11 @@ class WorkspaceService {
       'pending': null,
       'registeredKeys': snapshot.keys,
       'readOnly': registered != null && registered != await key.publicKey,
+      if (WorkflowRules.isPayerProposal(snapshot.session.draft))
+        'proposalTermsHash':
+            local['proposalTermsHash'] ??
+            proposalTermsDigest(snapshot.session.draft),
+      'signedArtifactReady': snapshot.signedArtifactReady,
     });
   }
 
@@ -200,7 +234,7 @@ class WorkspaceService {
       token: local['participantToken'] as String,
       encryptionKey: base64UrlDecodeNoPadding(local['key'] as String),
       isOwner: false,
-      workflowProfile: WorkflowRules.profile,
+      workflowProfile: session(local).draft.fields['workflowProfile'],
     ).toInviteFragment();
   }
 
@@ -211,6 +245,9 @@ class WorkspaceService {
     bool consent = false,
     Map<String, String>? bankFields,
     String? paymentReference,
+    List<int>? attachment,
+    String? responseNote,
+    IdentityEvidence? recipientEvidence,
   }) async {
     final local = record(id);
     _checkEndpoint(local);
@@ -234,11 +271,50 @@ class WorkspaceService {
       role,
       WorkflowRules.creator(current.draft),
       action,
+      payerProposal: WorkflowRules.isPayerProposal(current.draft),
     );
     final key = WorkflowKey(
       base64UrlDecodeNoPadding(local['actionSeed'] as String),
     );
-    if (action == WorkflowAction.approve && bankFields != null) {
+    final payerProposal = WorkflowRules.isPayerProposal(current.draft);
+    if (payerProposal &&
+        action == WorkflowAction.reportTransfer &&
+        local['signedArtifactReady'] != true) {
+      throw StateError(
+        'Lưu/công bố bản hợp đồng đã ký trước khi báo chuyển tiền.',
+      );
+    }
+    Map<String, String> identityFields = {};
+    if (payerProposal && action == WorkflowAction.approve) {
+      if (!consent || identityService == null) {
+        throw StateError(
+          'A cần đồng ý đọc danh tính mock trước khi khóa bản cuối.',
+        );
+      }
+      final identity =
+          recipientEvidence ??
+          await identityService.identify(
+            context: IdentityContext.create(
+              ceremonyId: current.draft.fields['identityCeremonyId']!,
+              role: role.name,
+            ),
+            consent: consent,
+          );
+      if (identity.source != 'mock' ||
+          identity.assurance != IdentityAssurance.mock ||
+          identity.proof != null ||
+          identity.context?.role != 'partyA' ||
+          identity.context?.ceremonyId !=
+              current.draft.fields['identityCeremonyId'] ||
+          identity.context?.isValidAt(DateTime.now().toUtc()) != true) {
+        throw const FormatException(
+          'Danh tính A chưa sẵn sàng hoặc đã hết hạn; đọc lại mock.',
+        );
+      }
+      identityFields = recipientIdentity(identity);
+    }
+    if (action == WorkflowAction.approve &&
+        (bankFields != null || payerProposal)) {
       final draft = current.draft;
       current = SigningSession(
         state: AgreementState.draft,
@@ -251,8 +327,10 @@ class WorkspaceService {
           templateId: draft.templateId,
           fields: {
             ...draft.fields,
+            ...identityFields,
+            if (payerProposal) 'proposalDigest': proposalTermsDigest(draft),
             for (final name in ['bankBin', 'accountNumber', 'accountName'])
-              name: bankFields[name] ?? draft.fields[name] ?? '',
+              name: bankFields?[name]?.trim() ?? draft.fields[name] ?? '',
           },
         ),
       );
@@ -284,6 +362,14 @@ class WorkspaceService {
           'Danh tính người tạo thay đổi. Cần tạo đề xuất mới, không ký lên thông tin cũ.',
         );
       }
+      if (payerProposal &&
+          role == PartyRole.partyA &&
+          current.draft.fields['partyAIdentityCommitment'] !=
+              identity.identityCommitment) {
+        throw const FormatException(
+          'Danh tính A khác bản đã khóa. Cần đề xuất mới.',
+        );
+      }
       signature = await MockPartySigner().sign(
         role: role.name,
         digest: hexToBytes(
@@ -300,10 +386,50 @@ class WorkspaceService {
       action,
       signature: signature,
       paymentReference: paymentReference,
+      transfer: payerProposal && action == WorkflowAction.reportTransfer
+          ? TransferEvidence.create(
+              agreementId: current.draft.id,
+              reference: paymentReference ?? '',
+              bytes: attachment,
+            )
+          : null,
+      response:
+          payerProposal &&
+              {
+                WorkflowAction.requestChanges,
+                WorkflowAction.decline,
+                WorkflowAction.reportIssue,
+              }.contains(action)
+          ? {'action': action.name, 'note': responseNote?.trim() ?? ''}
+          : null,
     );
     await validator.validate(next);
     await _mutate(local, next, action.name);
     return record(id);
+  }
+
+  Future<void> publishSigned(String id, Map<String, Object?> archive) async {
+    final local = record(id);
+    _checkEndpoint(local);
+    final current = session(local);
+    if (!WorkflowRules.isPayerProposal(current.draft) ||
+        local['role'] != 'partyB' ||
+        current.state != AgreementState.bothSigned ||
+        local['pending'] != null) {
+      throw StateError(
+        'B công bố bản nguyên gốc sau khi đủ hai chữ ký; hãy làm mới nếu có thao tác chờ.',
+      );
+    }
+    final box = await repository.cipher.encrypt(
+      archive,
+      base64UrlDecodeNoPadding(local['key'] as String),
+    );
+    await _mutate(
+      local,
+      current,
+      'publishSignedArtifact',
+      artifact: box.toJson(),
+    );
   }
 
   Future<void> _mutate(

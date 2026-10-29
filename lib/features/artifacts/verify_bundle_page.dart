@@ -181,6 +181,14 @@ List<VerificationResult> verificationResultsFor(
         ? VerificationLevel.unavailable
         : VerificationLevel.present,
   ),
+  if (manifest.session.transfer != null)
+    VerificationResult(
+      'Chứng từ chuyển khoản',
+      manifest.session.transfer!['attachment'] == null
+          ? 'B tự báo chuyển, không có tệp đính kèm; chưa được ngân hàng kiểm chứng.'
+          : 'Có chứng từ do B cung cấp; hash được kiểm cùng evidence, không chứng minh tiền đã đến.',
+      VerificationLevel.present,
+    ),
   sctVerificationResultFor(
     manifest.signedCommitment,
     documentHash: manifest.documentHash,

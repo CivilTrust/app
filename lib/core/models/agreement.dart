@@ -11,6 +11,8 @@ enum AgreementState {
   committedPendingAnchor,
   batched,
   bothSigned,
+  changesRequested,
+  declined,
 }
 
 class AgreementDraft {
@@ -88,6 +90,8 @@ class SigningSession {
     this.partyB,
     this.payment,
     this.events = const [],
+    this.transfer,
+    this.response,
   });
 
   factory SigningSession.fromJson(Map<String, dynamic> json) => SigningSession(
@@ -111,6 +115,12 @@ class SigningSession {
         : PaymentReceipt.fromJson(
             Map<String, dynamic>.from(json['payment'] as Map),
           ),
+    transfer: json['transfer'] == null
+        ? null
+        : Map<String, dynamic>.from(json['transfer'] as Map),
+    response: json['response'] == null
+        ? null
+        : Map<String, dynamic>.from(json['response'] as Map),
     events: (json['events'] as List? ?? [])
         .map((event) => Map<String, dynamic>.from(event as Map))
         .toList(),
@@ -122,6 +132,8 @@ class SigningSession {
   final PartySignature? partyA;
   final PartySignature? partyB;
   final PaymentReceipt? payment;
+  final Map<String, dynamic>? transfer;
+  final Map<String, dynamic>? response;
   final List<Map<String, dynamic>> events;
 
   SigningSession copyWith({
@@ -131,6 +143,8 @@ class SigningSession {
     PartySignature? partyB,
     PaymentReceipt? payment,
     List<Map<String, dynamic>>? events,
+    Map<String, dynamic>? transfer,
+    Map<String, dynamic>? response,
   }) => SigningSession(
     draft: draft,
     state: state ?? this.state,
@@ -139,6 +153,8 @@ class SigningSession {
     partyB: partyB ?? this.partyB,
     payment: payment ?? this.payment,
     events: events ?? this.events,
+    transfer: transfer ?? this.transfer,
+    response: response ?? this.response,
   );
 
   Map<String, Object?> toJson() => {
@@ -149,5 +165,7 @@ class SigningSession {
     'partyB': partyB?.toJson(),
     'payment': payment?.toJson(),
     if (events.isNotEmpty) 'events': events,
+    if (transfer != null) 'transfer': transfer,
+    if (response != null) 'response': response,
   };
 }
