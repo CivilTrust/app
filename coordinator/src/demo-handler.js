@@ -1,6 +1,7 @@
 import { createReadStream } from "node:fs";
 import { realpath, stat } from "node:fs/promises";
 import { resolve, sep, extname } from "node:path";
+import { createGzip } from "node:zlib";
 
 const types = {
   ".html": "text/html; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -8,6 +9,10 @@ const types = {
   ".png": "image/png", ".ico": "image/x-icon", ".svg": "image/svg+xml",
   ".ttf": "font/ttf", ".otf": "font/otf", ".woff2": "font/woff2",
 };
+
+// Text assets compress ~70% (main.dart.js 5.3 MB -> 1.5 MB); wasm/png are
+// already compact or compressed by the CDN/tunnel in front of the demo.
+const compressible = new Set([".html", ".js", ".json", ".css", ".svg", ".otf", ".ttf"]);
 
 export function createDemoHandler({ webRoot, coordinator }) {
   const root = resolve(webRoot);
@@ -42,14 +47,23 @@ export function createDemoHandler({ webRoot, coordinator }) {
       }
       const file = await stat(candidate);
       if (!file.isFile()) { response.writeHead(404).end(); return; }
+      const gzip = compressible.has(extname(candidate)) &&
+        /\bgzip\b/.test(String(request.headers["accept-encoding"] ?? ""));
       response.writeHead(200, {
         "content-type": types[extname(candidate)] ?? "application/octet-stream",
-        "content-length": file.size,
+        vary: "accept-encoding",
+        ...(gzip ? { "content-encoding": "gzip" } : { "content-length": file.size }),
       });
       if (request.method === "HEAD") { response.end(); return; }
       const stream = createReadStream(candidate);
       stream.on("error", () => response.destroy());
-      stream.pipe(response);
+      if (gzip) {
+        const zip = createGzip();
+        zip.on("error", () => response.destroy());
+        stream.pipe(zip).pipe(response);
+      } else {
+        stream.pipe(response);
+      }
     } catch {
       if (!response.headersSent) response.writeHead(404);
       response.end();

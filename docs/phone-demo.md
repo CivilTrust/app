@@ -1,6 +1,6 @@
 # Chạy thử CivilTrust trên Windows và iPhone
 
-Đây là bản demo Web dùng danh tính/chữ ký mock. Không đưa CCCD thật hoặc tài khoản thật vào **phiên ký demo công khai**, không chuyển tiền thật trong lượt thử. Riêng màn **Thông tin → Thử VietQR cục bộ** cho phép tự nhập tài khoản nhóm kiểm soát ngay trên thiết bị để đối chiếu màn xem trước ngân hàng: dữ liệu nhập chỉ ở trang đó, không tạo phiên hoặc gọi coordinator/notary. Không gửi số tài khoản thật vào chat, ảnh chụp báo cáo hoặc Git. NFC native, proof/RPC và notary thật chưa được nghiệm thu ở bước cấu hình ngày 02/11.
+Đây là bản demo Web dùng danh tính/chữ ký mock. Không đưa CCCD thật hoặc tài khoản thật vào **phiên ký demo công khai**, không chuyển tiền thật trong lượt thử. Riêng màn **⋮ → Công cụ & chẩn đoán → Thử VietQR cục bộ** cho phép tự nhập tài khoản nhóm kiểm soát ngay trên thiết bị để đối chiếu màn xem trước ngân hàng: dữ liệu nhập chỉ ở trang đó, không tạo phiên hoặc gọi coordinator/notary. Không gửi số tài khoản thật vào chat, ảnh chụp báo cáo hoặc Git. NFC native, proof/RPC và notary thật chưa được nghiệm thu ở bước cấu hình ngày 02/11.
 
 ## Tạo URL HTTPS tạm
 
@@ -45,7 +45,7 @@ Nếu dùng một `PORT` khác: `./start-phone-demo.ps1 -Port 8791`. Port đã c
 ## Kiểm nhanh trên hai thiết bị
 
 1. Mở cùng URL HTTPS trên Chrome/Edge Windows và Safari iPhone. Lần đầu có thể tải Flutter lâu; màn nạp hiển thị trong lúc chờ.
-2. Vào **Thông tin → Kiểm tra kết nối**. Coordinator cần trả health hợp lệ; notary của build mặc định phải hiển thị đã tắt. Health không đồng nghĩa toàn bộ ký/ZIP hoặc blockchain đã được kiểm.
+2. Vào **⋮ → Công cụ & chẩn đoán → Kiểm tra kết nối**. Coordinator cần trả health hợp lệ; notary của build mặc định phải hiển thị đã tắt. Health không đồng nghĩa toàn bộ ký/ZIP hoặc blockchain đã được kiểm.
 3. Windows tạo A, dùng CCCD mock và tài khoản giả lập; copy link mời mở trên iPhone. Không dùng URL localhost khi gửi sang điện thoại. Link chứa khóa giải mã/capability trong fragment nên chỉ gửi riêng cho người đóng vai B; không đăng ảnh chụp link.
 4. B đọc/ký mock và báo chuyển khoản mô phỏng; A làm mới và ghi chú `DEMO - không có giao dịch thật` trước khi xác nhận. App vẫn xuất ZIP mà không gọi notary ở build offline.
 5. Đổi vai Windows/iPhone; kiểm link, date picker, tải ZIP và nhập ZIP ở trình duyệt độc lập. Ghi pass/fail từng bước; không suy ra Safari đã qua từ widget test trên Windows.
@@ -56,7 +56,7 @@ Ghi cho mỗi lượt: commit/build, model iPhone, iOS/Safari, Chrome/Edge Windo
 
 Từ bản công việc 03/11, màn A/B dùng chung thông tin đã khóa: BIN, tài khoản, tên người nhận do A cung cấp, số tiền và nội dung chuyển khoản. Nút **Sao chép Số tiền** sao chép số nguyên đồng, không có dấu phân cách. **Tải ảnh QR** xuất PNG riêng với nền trắng/quiet zone; **Chia sẻ ảnh QR** mở share sheet khi thiết bị hỗ trợ. Nếu chia sẻ không hỗ trợ, chọn tải hoặc nhập thông tin bằng tay; hủy chia sẻ không tự tải ảnh hoặc đánh dấu đã chuyển tiền.
 
-Để kiểm ngân hàng mà không tạo hợp đồng: vào **Thông tin → Thử VietQR cục bộ**, nhập BIN/tài khoản nhóm kiểm soát, tên khai báo và số tiền thử; tạo QR rồi lưu/chia sẻ ảnh. Mở chức năng đọc ảnh QR của app ngân hàng, đối chiếu tên người nhận ngân hàng trả về, số tiền và nội dung rồi dừng trước bước xác nhận chuyển tiền. Nếu không đọc được ảnh, thử quét QR từ màn Windows hoặc nhập tay. Việc đổi đầu vào sẽ ẩn QR cũ cho tới khi tạo lại, tránh dùng nhầm tài khoản trước đó. Số tài khoản có trong PNG là dữ liệu cần thiết cho QR chuyển tiền; chỉ chia sẻ theo mục đích của bạn.
+Để kiểm ngân hàng mà không tạo hợp đồng: vào **⋮ → Công cụ & chẩn đoán → Thử VietQR cục bộ**, nhập BIN/tài khoản nhóm kiểm soát, tên khai báo và số tiền thử; tạo QR rồi lưu/chia sẻ ảnh. Mở chức năng đọc ảnh QR của app ngân hàng, đối chiếu tên người nhận ngân hàng trả về, số tiền và nội dung rồi dừng trước bước xác nhận chuyển tiền. Nếu không đọc được ảnh, thử quét QR từ màn Windows hoặc nhập tay. Việc đổi đầu vào sẽ ẩn QR cũ cho tới khi tạo lại, tránh dùng nhầm tài khoản trước đó. Số tài khoản có trong PNG là dữ liệu cần thiết cho QR chuyển tiền; chỉ chia sẻ theo mục đích của bạn.
 
 Phiên mới dùng nội dung chuyển khoản dẫn xuất từ toàn bộ ID, lưu cùng profile `vietqr-account/2` trong draft trước khi A/B ký. Đây là version của app, không phải công bố version chuẩn NAPAS. Phiên cũ vẫn giữ reference từng dùng; số tài khoản cũ vượt giới hạn profile sẽ được báo không hỗ trợ thay vì cắt/sửa trong hồ sơ đã ký. Đọc được QR không phải bằng chứng đã nhận tiền.
 

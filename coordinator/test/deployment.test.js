@@ -31,6 +31,19 @@ test("demo serves only compiled assets and coordinator with exact CORS", async (
   try {
     const index = await fetch(base);
     assert.equal(await index.text(), "demo-public-build");
+    const zipped = await fetch(base, { headers: { "accept-encoding": "gzip" } });
+    assert.equal(zipped.headers.get("content-encoding"), "gzip");
+    assert.equal(await zipped.text(), "demo-public-build");
+    const plain = await new Promise((done, fail) => {
+      // Raw request without Accept-Encoding (fetch always sends one).
+      import("node:http").then(({ get }) => get(base, (res) => {
+        let body = "";
+        res.on("data", (c) => { body += c; });
+        res.on("end", () => done({ encoding: res.headers["content-encoding"], body }));
+      }).on("error", fail));
+    });
+    assert.equal(plain.encoding, undefined);
+    assert.equal(plain.body, "demo-public-build");
     assert.equal(index.headers.get("referrer-policy"), "no-referrer");
     for (const path of ["/private.txt", "/%2e%2e%2fprivate.txt", "/%2e%2e%5cprivate.txt", "/.git/config", "/%00"]) {
       assert.equal((await fetch(base + path)).status, 404, path);

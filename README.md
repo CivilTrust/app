@@ -2,11 +2,15 @@
 
 ## NFC readiness (G0/G1)
 
-See [NFC G0/G1 acceptance](docs/nfc-g0-g1-acceptance.md) for implemented bindings, tests and external blockers. Run `./nfc-preflight.ps1` for a read-only inventory. In the app open **Thông tin → Kiểm tra NFC readiness**. `IDENTITY_MODE` accepts `mock` (default), `native-lab`, or `verified-native`; native modes fail closed until a real SDK/verifier is integrated and never fall back to mock. No real CCCD should be used in this release.
+See [NFC G0/G1 acceptance](docs/nfc-g0-g1-acceptance.md) for implemented bindings, tests and external blockers. Run `./nfc-preflight.ps1` for a read-only inventory. In the app open **⋮ → Công cụ & chẩn đoán → Kiểm tra NFC readiness**. `IDENTITY_MODE` accepts `mock` (default), `native-lab`, or `verified-native`; native modes fail closed until a real SDK/verifier is integrated and never fall back to mock. No real CCCD should be used in this release.
 
 New agreements use demo signing envelopes v2; evidence ZIP v2 remains supported and the new B-proposal flow uses evidence v3 for immutable PDF plus evolving payment evidence. Legacy v1 remains readable with an identity-unbound warning. A valid demo signature is not CCCD or cardholder authentication. The manual iOS preflight workflow is unsigned compilation only, not a device-installable build or NFC acceptance; it has not been run. Both parties must use the updated app for new profiles.
 
 Flutter Web/iOS client and a small encrypted coordinator for a two-party remote electronic-agreement demo. The implementation is isolated in `app/`; it does not modify `contracts/` or `service/`.
+
+## User interface
+
+The app opens on a home page (how it works, honest demo notice, FAQ). Bottom navigation on phones, a side rail from 840 px: Trang chủ · Tạo mới · Tham gia · Hồ sơ · Kiểm chứng. The ⋮ menu holds FAQ, draft Terms of Use, draft Privacy Policy and the tools/diagnostics page. **Hồ sơ** groups agreements by what needs your action and shows a CT-XXXXXXXX code that matches the VietQR transfer memo; each record shows a progress timeline. Signing requires reading the full frozen text, and every irreversible step asks for confirmation. While the vault is open and the app is visible, a read-only watcher checks for the other party's changes about every 45 seconds and shows them under the bell icon. Details and limits: [UI acceptance 18/11/2026](docs/ui-acceptance-2026-11-18.md).
 
 ## What works
 
@@ -16,7 +20,7 @@ The default UI uses the workspace described in [workspace acceptance](docs/works
 - The client encrypts the signing session with AES-256-GCM and uploads only the envelope to the coordinator.
 - Party B opens a capability invite on another browser/device, verifies A, reads mock CCCD, and signs its own v2 envelope referencing the same frozen draft digest.
 - For the current MVP payment direction, Party B transfers to Party A: B is the depositor for a deposit agreement or the lender for a loan agreement. Party A checks the real banking app before confirming receipt.
-- A/B share the same offline VietQR account-transfer profile, with PNG download/share and copyable payment details for a single-phone flow. New payment references are reviewed and signed in the draft; existing sessions keep their old reference. The **Thông tin → Thử VietQR cục bộ** tool generates a preview locally without creating a session or sending account details to coordinator/notary.
+- A/B share the same offline VietQR account-transfer profile, with PNG download/share and copyable payment details for a single-phone flow. New payment references are reviewed and signed in the draft; existing sessions keep their old reference. The **⋮ → Công cụ & chẩn đoán → Thử VietQR cục bộ** tool generates a preview locally without creating a session or sending account details to coordinator/notary.
 - Party A verifies the returned session, records a manual payment receipt confirmation, generates immutable `agreement.pdf`, hashes it with Keccak-256, calls the existing notary service, and finalizes the coordinator session.
 - SCT/evidence stays in `evidence.civiltrust.json`; it is never inserted back into the hashed PDF.
 - Export/import ZIP verifies the PDF hash, canonical evidence hash, and both mock signatures offline.
@@ -89,7 +93,7 @@ Compile-time values are supplied with `--dart-define`:
 
 Coordinator/notary URLs may also be root-relative (for example `/coordinator`)
 when served by the same Web origin. Query, fragment and credential-bearing
-endpoints are rejected by configuration checks. The **Thông tin** tab runs an
+endpoints are rejected by configuration checks. The **⋮ → Công cụ & chẩn đoán** page runs an
 on-demand read-only health probe; it never creates a session or submits a PDF hash.
 
 `SCT_BATCH_SIGNER` and `SCT_RECEIPT_SIGNER` are **public addresses** from the

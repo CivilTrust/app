@@ -47,8 +47,15 @@ class FlowProgress extends StatelessWidget {
                     'Bước ${safeCurrent + 1}/${labels.length}',
                     style: const TextStyle(fontWeight: FontWeight.w700),
                   ),
-                  const Spacer(),
-                  Text(labels[safeCurrent]),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      labels[safeCurrent],
+                      textAlign: TextAlign.end,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
                 ],
               ),
               const SizedBox(height: 8),
