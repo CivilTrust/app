@@ -3,6 +3,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../ui/app_theme.dart';
+import '../features/home/home_page.dart';
+import '../features/identity/identity_service.dart';
+import '../features/legal/legal_content.dart';
+import '../features/legal/legal_pages.dart';
 
 import '../core/config/app_config.dart';
 import '../core/config/environment_check.dart';
@@ -58,7 +62,7 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
     super.initState();
     vault.addListener(changed);
     WidgetsBinding.instance.addObserver(this);
-    index = Uri.base.fragment.startsWith('join=') ? 1 : 0;
+    index = Uri.base.fragment.startsWith('join=') ? _joinTab : _homeTab;
   }
 
   void changed() {
@@ -156,13 +160,24 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
     await openRecord(local['localId'] as String);
   }
 
+  static const _homeTab = 0, _createTab = 1, _joinTab = 2, _recordsTab = 3;
+  static const _verifyTab = 4;
   static const _destinations = [
+    (Icons.home_outlined, Icons.home, 'Trang chủ', 'Trang chủ'),
     (Icons.add_box_outlined, Icons.add_box, 'Tạo mới', 'Tạo hợp đồng'),
     (Icons.qr_code_scanner, Icons.qr_code_scanner, 'Tham gia', 'Tham gia ký'),
     (Icons.folder_open_outlined, Icons.folder_open, 'Hồ sơ', 'Hồ sơ hợp đồng'),
     (Icons.verified_outlined, Icons.verified, 'Kiểm chứng', 'Kiểm chứng'),
-    (Icons.info_outline, Icons.info, 'Thông tin', 'Thông tin & công cụ'),
   ];
+
+  void openTools() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Scaffold(
+        appBar: AppBar(title: const Text('Công cụ & chẩn đoán')),
+        body: EnvironmentPage(config: config),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -175,9 +190,17 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
     Widget unavailable(String action) => _ServiceUnavailable(
       action: action,
       issues: issues,
-      onDetails: () => setState(() => index = 4),
+      onDetails: openTools,
     );
+    void go(int tab) => setState(() => index = tab);
     final pages = [
+      HomePage(
+        onCreate: () => go(_createTab),
+        onJoin: () => go(_joinTab),
+        onRecords: () => go(_recordsTab),
+        onVerify: () => go(_verifyTab),
+        mockIdentity: config.identityMode == IdentityMode.mock,
+      ),
       issues.isNotEmpty
           ? unavailable('tạo hợp đồng')
           : CreateAgreementPage(
@@ -198,7 +221,6 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
         resumeForm: resumeForm,
       ),
       VerifyBundlePage(config: config),
-      EnvironmentPage(config: config),
     ];
     final width = MediaQuery.sizeOf(context).width;
     final useRail = width >= AppBreakpoints.rail;
@@ -231,6 +253,55 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
                 ),
               ),
             ),
+          PopupMenuButton<String>(
+            tooltip: 'Thêm',
+            icon: const Icon(Icons.more_vert),
+            onSelected: (value) => switch (value) {
+              'faq' => openLegalPage(context, const FaqPage()),
+              'terms' => openLegalPage(
+                context,
+                const LegalDocumentPage(document: termsOfUse),
+              ),
+              'privacy' => openLegalPage(
+                context,
+                const LegalDocumentPage(document: privacyPolicy),
+              ),
+              _ => openTools(),
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'faq',
+                child: ListTile(
+                  leading: Icon(Icons.help_outline),
+                  title: Text('Câu hỏi thường gặp'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'terms',
+                child: ListTile(
+                  leading: Icon(Icons.description_outlined),
+                  title: Text('Điều khoản sử dụng'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'privacy',
+                child: ListTile(
+                  leading: Icon(Icons.privacy_tip_outlined),
+                  title: Text('Chính sách quyền riêng tư'),
+                ),
+              ),
+              PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'tools',
+                child: ListTile(
+                  leading: Icon(Icons.build_outlined),
+                  title: Text('Công cụ & chẩn đoán'),
+                  subtitle: Text('Kết nối, thử VietQR, NFC'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(width: 4),
         ],
       ),
       body: useRail
@@ -249,7 +320,7 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
                       NavigationRailDestination(
                         icon: Icon(d.$1),
                         selectedIcon: Icon(d.$2),
-                        label: Text(extended ? d.$4 : d.$3),
+                        label: Text(d.$3),
                       ),
                   ],
                 ),

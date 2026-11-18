@@ -47,12 +47,14 @@ void main() {
     await tester.tap(find.text('Hợp đồng đặt cọc'));
     await tester.pumpAndSettle();
     expect(find.text('Quét CCCD mock của Bên A'), findsNothing);
+    await tester.ensureVisible(find.byType(CheckboxListTile).first);
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(CheckboxListTile).first);
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Kiểm tra NFC Bên A'));
     await tester.tap(find.text('Kiểm tra NFC Bên A'));
     await tester.pumpAndSettle();
-    expect(find.textContaining('không chạy trên Web/Windows'), findsOneWidget);
+    expect(find.textContaining('không chạy trên Web/Windows'), findsWidgets);
     expect(find.text('Tiếp tục xem lại'), findsNothing);
     expect(tester.takeException(), isNull);
   });

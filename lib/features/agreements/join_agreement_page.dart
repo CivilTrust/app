@@ -20,6 +20,7 @@ import '../sessions/invite_url.dart';
 import '../signing/mock_party_signer.dart';
 import '../signing/session_validator.dart';
 import '../signing/signing_context.dart';
+import '../legal/legal_pages.dart';
 
 class JoinAgreementPage extends StatefulWidget {
   const JoinAgreementPage({
@@ -63,6 +64,21 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
   void fail(String value) {
     _message = value;
     messageTone = AppTone.danger;
+    // The inline status sits at the top of a long page; also surface the
+    // error where the user is looking (they just tapped a lower button).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(value),
+            backgroundColor: AppTone.danger.foreground,
+            duration: const Duration(seconds: 6),
+            showCloseIcon: true,
+          ),
+        );
+    });
   }
 
   RemoteSessionRepository get repository =>
@@ -328,6 +344,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
                     '${identityService.notice} Chữ ký demo v2 ràng buộc danh tính mô phỏng với nội dung; chưa phải chữ ký số được chứng nhận.',
               ),
               const SizedBox(height: 10),
+              IdentityDataNotice(mock: identityService.isMock),
               CheckboxListTile(
                 contentPadding: EdgeInsets.zero,
                 value: identityConsent,
@@ -335,11 +352,11 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
                     setState(() => identityConsent = value ?? false),
                 title: Text(
                   identityService.isMock
-                      ? 'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo'
+                      ? 'Tôi đã đọc thông báo trên và đồng ý cho xử lý dữ liệu căn cước (mô phỏng) để lập hợp đồng'
                       : 'Tôi đồng ý bắt đầu kiểm tra khả năng NFC (chưa đọc CCCD thật)',
                 ),
                 subtitle: const Text(
-                  'Consent này không đồng nghĩa đồng ý nội dung hợp đồng.',
+                  'Đồng ý này không đồng nghĩa đồng ý nội dung hợp đồng.',
                 ),
                 controlAffinity: ListTileControlAffinity.leading,
               ),

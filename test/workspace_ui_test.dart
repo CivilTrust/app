@@ -15,6 +15,9 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const CivilTrustApp());
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Tạo mới'));
+    await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await tester.ensureVisible(find.byType(DropdownButtonFormField<PartyRole>));
     await tester.tap(find.byType(DropdownButtonFormField<PartyRole>));
@@ -62,6 +65,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.byType(CheckboxListTile).first);
+      await tester.pumpAndSettle();
       await tester.tap(find.byType(CheckboxListTile).first);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Quét CCCD mock của Bên B'));

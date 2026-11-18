@@ -23,6 +23,7 @@ import 'workflow_rules.dart';
 import 'workspace_artifacts.dart';
 import 'workspace_service.dart';
 import 'payer_proposal.dart';
+import '../legal/legal_pages.dart';
 
 class WorkspaceDetailPage extends StatefulWidget {
   const WorkspaceDetailPage({
@@ -442,6 +443,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                     'A kiểm tra/sửa tài khoản nhận trước khi duyệt. Đây không phải xác nhận quyền sở hữu tài khoản từ ngân hàng.',
                   ),
                   if (payerProposal) ...[
+                    IdentityDataNotice(mock: identity.isMock),
                     CheckboxListTile(
                       value: consent,
                       onChanged: busy
@@ -507,6 +509,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                 'Tôi đã đọc nội dung, thông tin nhận tiền và đồng ý ký bản đã khóa.',
               ),
             ),
+            IdentityDataNotice(mock: identity.isMock),
             CheckboxListTile(
               value: consent,
               onChanged: (v) => setState(() => consent = v ?? false),

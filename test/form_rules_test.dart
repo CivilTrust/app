@@ -175,6 +175,9 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     await tester.pumpWidget(const CivilTrustApp());
     await tester.pumpAndSettle();
+    await tester.tap(find.text('Tạo mới'));
+    await tester.pumpAndSettle();
+    await tester.pumpAndSettle();
     await tester.drag(find.byType(ListView).first, const Offset(0, -500));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Hợp đồng vay tiền'));

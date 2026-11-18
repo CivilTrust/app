@@ -36,6 +36,7 @@ import '../signing/signing_context.dart';
 import 'contract_template.dart';
 import 'contract_template_service.dart';
 import 'agreement_validator.dart';
+import '../legal/legal_pages.dart';
 
 class CreateAgreementPage extends StatefulWidget {
   const CreateAgreementPage({
@@ -101,6 +102,21 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   void fail(String value) {
     _message = value;
     messageTone = AppTone.danger;
+    // The inline status sits at the top of a long page; also surface the
+    // error where the user is looking (they just tapped a lower button).
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(context)
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(value),
+            backgroundColor: AppTone.danger.foreground,
+            duration: const Duration(seconds: 6),
+            showCloseIcon: true,
+          ),
+        );
+    });
   }
 
   PartyRole creatorRole = PartyRole.partyA;
@@ -681,6 +697,8 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
           message: identityService.notice,
         ),
         const SizedBox(height: 12),
+        IdentityDataNotice(mock: identityService.isMock),
+        const SizedBox(height: 4),
         CheckboxListTile(
           contentPadding: EdgeInsets.zero,
           value: identityConsent,
@@ -688,11 +706,11 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
               setState(() => identityConsent = value ?? false),
           title: Text(
             identityService.isMock
-                ? 'Tôi đồng ý dùng dữ liệu CCCD mô phỏng cho bản demo'
+                ? 'Tôi đã đọc thông báo trên và đồng ý cho xử lý dữ liệu căn cước (mô phỏng) để lập hợp đồng'
                 : 'Tôi đồng ý bắt đầu kiểm tra khả năng NFC (chưa đọc CCCD thật)',
           ),
           subtitle: const Text(
-            'Consent này tách biệt với việc đồng ý nội dung hợp đồng.',
+            'Đồng ý này tách biệt với việc đồng ý nội dung hợp đồng.',
           ),
           controlAffinity: ListTileControlAffinity.leading,
         ),
