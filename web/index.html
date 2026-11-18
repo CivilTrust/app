@@ -19,23 +19,28 @@
   <meta charset="UTF-8">
   <meta name="referrer" content="no-referrer">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="CivilTrust — tạo, ký từ xa và kiểm chứng hợp đồng đặt cọc, vay tiền.">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#1E3A8A">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="civiltrust_app">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="CivilTrust">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>civiltrust_app</title>
+  <title>CivilTrust — Hợp đồng điện tử có thể kiểm chứng</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
-  <div id="app-loading" role="status" style="padding:32px;font-family:system-ui;color:#0f766e">
-    Đang mở CivilTrust… Lần đầu có thể cần chờ tải dữ liệu qua mạng.
+  <div id="app-loading" role="status" aria-live="polite"
+       style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#F8FAFC;font-family:system-ui,-apple-system,'Segoe UI',sans-serif;color:#0F172A;text-align:center;padding:24px">
+    <div style="width:56px;height:56px;border-radius:14px;background:linear-gradient(135deg,#1E3A8A,#0D9488)"></div>
+    <div style="font-size:20px;font-weight:800;color:#1E3A8A">CivilTrust</div>
+    <div style="font-size:15px;color:#475569;max-width:320px">Đang mở ứng dụng… Lần đầu có thể mất vài giây để tải.</div>
   </div>
   <script>
     window.addEventListener('flutter-first-frame', function () {

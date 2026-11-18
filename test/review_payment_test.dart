@@ -19,6 +19,8 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byType(CheckboxListTile).first);
       await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Quét CCCD mock của Bên A'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Quét CCCD mock của Bên A'));
       await tester.pumpAndSettle();
       await tester.pump(const Duration(seconds: 1));
@@ -36,15 +38,14 @@ void main() {
         await tester.pumpAndSettle();
       }
 
-      await fill('Tài sản hoặc đối tượng đặt cọc', 'Tài sản kiểm thử');
-      await fill('Địa chỉ hoặc nơi giao nhận tài sản', 'Địa điểm kiểm thử');
-      await fill('Tổng giá trị giao dịch (VND)', '2000000');
-      await fill('Số tiền đặt cọc (VND)', '1000000');
+      await fill('Tài sản đặt cọc', 'Tài sản kiểm thử');
+      await fill('Nơi giao nhận tài sản', 'Địa điểm kiểm thử');
+      await fill('Tổng giá trị giao dịch', '2000000');
+      await fill('Số tiền đặt cọc', '1000000');
       final date = find.byWidgetPredicate(
         (widget) =>
             widget is TextField &&
-            widget.decoration?.labelText ==
-                'Hạn ký hợp đồng chính hoặc giao nhận',
+            widget.decoration?.labelText == 'Hạn hoàn tất giao dịch',
       );
       await tester.ensureVisible(date);
       await tester.tap(date);
@@ -74,7 +75,7 @@ void main() {
       await tester.ensureVisible(find.text('Chỉnh sửa'));
       await tester.tap(find.text('Chỉnh sửa'));
       await tester.pumpAndSettle();
-      await fill('Số tiền đặt cọc (VND)', '2000000');
+      await fill('Số tiền đặt cọc', '2000000');
       await tester.ensureVisible(find.text('Tiếp tục xem lại'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Tiếp tục xem lại'));

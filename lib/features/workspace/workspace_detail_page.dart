@@ -1,3 +1,6 @@
+import '../agreements/agreement_validator.dart';
+import '../../ui/form_fields.dart';
+
 import 'package:file_saver/file_saver.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -233,6 +236,56 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
     attachment = bytes;
     attachmentReviewed = false;
   });
+  List<Widget> _recipientFields(bool payerProposal) {
+    final enabled = !busy && (!payerProposal || recipientPreview != null);
+    void changed() {
+      if (payerProposal) setState(() => reviewed = false);
+    }
+
+    const validator = AgreementValidator();
+    return [
+      const SizedBox(height: 8),
+      BankPickerFormField(
+        controller: bank['bankBin']!,
+        enabled: enabled,
+        validator: validator.validateBankBin,
+        onChanged: changed,
+      ),
+      const SizedBox(height: 12),
+      TextFormField(
+        controller: bank['accountNumber'],
+        enabled: enabled,
+        onChanged: (_) => changed(),
+        maxLength: 19,
+        autocorrect: false,
+        enableSuggestions: false,
+        inputFormatters: [
+          FilteringTextInputFormatter.allow(RegExp('[0-9A-Za-z]')),
+        ],
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        validator: validator.validateAccountNumber,
+        decoration: const InputDecoration(
+          labelText: 'Số tài khoản nhận tiền',
+          helperText: '4–19 ký tự chữ hoặc số, không có khoảng trắng.',
+        ),
+      ),
+      const SizedBox(height: 4),
+      TextFormField(
+        controller: bank['accountName'],
+        enabled: enabled,
+        onChanged: (_) => changed(),
+        maxLength: 70,
+        textCapitalization: TextCapitalization.characters,
+        autovalidateMode: AutovalidateMode.onUserInteraction,
+        validator: validator.validateAccountName,
+        decoration: const InputDecoration(
+          labelText: 'Tên người nhận do A xác nhận',
+          helperText: 'Ghi đúng như trong app ngân hàng.',
+        ),
+      ),
+    ];
+  }
+
   Future<void> readRecipient() => run(() async {
     final value = await identity.identify(
       context: IdentityContext.create(
@@ -242,6 +295,10 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
       consent: consent,
     );
     if (!mounted || !widget.service.vault.unlocked) return;
+    final ageError = const AgreementValidator().signerAgeError(
+      value.attributes['dateOfBirth']?.toString(),
+    );
+    if (ageError != null) throw StateError(ageError);
     recipientPreview = value;
     if (bank['bankBin']!.text.isEmpty) bank['bankBin']!.text = '970436';
     if (bank['accountName']!.text.isEmpty) {
@@ -405,22 +462,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                         'Danh tính A: ${recipientPreview!.displayName} · ${recipientPreview!.documentNumberMasked}',
                       ),
                   ],
-                  for (final name in bank.keys)
-                    TextField(
-                      controller: bank[name],
-                      enabled:
-                          !busy && (!payerProposal || recipientPreview != null),
-                      onChanged: payerProposal
-                          ? (_) => setState(() => reviewed = false)
-                          : null,
-                      decoration: InputDecoration(
-                        labelText: switch (name) {
-                          'bankBin' => 'BIN ngân hàng',
-                          'accountNumber' => 'Số tài khoản nhận tiền',
-                          _ => 'Tên người nhận do A xác nhận',
-                        },
-                      ),
-                    ),
+                  ..._recipientFields(payerProposal),
                   CheckboxListTile(
                     value: reviewed,
                     onChanged: busy

@@ -12,8 +12,8 @@ void main() {
     expect(find.text('Tạo hợp đồng mới'), findsOneWidget);
     expect(find.text('Hợp đồng đặt cọc'), findsOneWidget);
     expect(find.text('Hợp đồng vay tiền'), findsOneWidget);
-    expect(find.text('Tạo hợp đồng'), findsOneWidget);
-    expect(find.text('Tham gia ký'), findsOneWidget);
+    expect(find.text('Tạo mới'), findsOneWidget);
+    expect(find.text('Tham gia'), findsOneWidget);
     expect(find.text('Kiểm chứng'), findsOneWidget);
   });
 

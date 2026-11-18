@@ -1,3 +1,4 @@
+import '../agreements/agreement_validator.dart';
 import '../../core/crypto/hash_service.dart';
 import '../../core/encoding/encoding_utils.dart';
 import '../../core/models/agreement.dart';
@@ -350,6 +351,10 @@ class WorkspaceService {
         ),
         consent: consent,
       );
+      final ageError = const AgreementValidator().signerAgeError(
+        identity.attributes['dateOfBirth']?.toString(),
+      );
+      if (ageError != null) throw StateError(ageError);
       final json = Map<String, dynamic>.from(identity.toJson());
       json['attributes'] = {
         ...identity.attributes,

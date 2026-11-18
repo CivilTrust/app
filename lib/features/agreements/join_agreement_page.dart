@@ -1,6 +1,9 @@
+import 'agreement_validator.dart';
+
 import 'package:flutter/material.dart';
 
 import '../../app/flow_widgets.dart';
+import '../../ui/app_theme.dart';
 import '../../core/config/app_config.dart';
 import '../../core/crypto/hash_service.dart';
 import '../../core/encoding/encoding_utils.dart';
@@ -49,7 +52,18 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
   var busy = false;
   var step = 0;
   DateTime? expiresAt;
-  String message = '';
+  String _message = '';
+  AppTone messageTone = AppTone.success;
+  String get message => _message;
+  set message(String value) {
+    _message = value;
+    messageTone = AppTone.success;
+  }
+
+  void fail(String value) {
+    _message = value;
+    messageTone = AppTone.danger;
+  }
 
   RemoteSessionRepository get repository =>
       RemoteSessionRepository(widget.config.coordinatorBaseUrl);
@@ -124,6 +138,10 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
       consent: identityConsent,
     );
     if (!mounted) return;
+    final ageError = const AgreementValidator().signerAgeError(
+      evidence.attributes['dateOfBirth']?.toString(),
+    );
+    if (ageError != null) throw StateError(ageError);
     identityB = evidence;
     step = 2;
     message = 'Đã điền thông tin Bên B từ CCCD mock.';
@@ -179,7 +197,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
     try {
       await operation();
     } catch (error) {
-      message = 'Không thể tiếp tục: $error';
+      fail('Không thể tiếp tục: ${friendlyError(error)}');
     }
     if (mounted) setState(() => busy = false);
   }
@@ -208,15 +226,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
       if (message.isNotEmpty)
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(
-            message,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: message.startsWith('Không')
-                  ? Colors.red.shade700
-                  : const Color(0xff0f766e),
-            ),
-          ),
+          child: StatusMessage(message, tone: messageTone),
         ),
       if (step == 0) _openStep(),
       if (step == 1) _readStep(),

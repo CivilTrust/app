@@ -4,6 +4,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../../app/flow_widgets.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/form_fields.dart';
+import '../../core/formatting/vnd_words.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/environment_check.dart';
 import '../../core/crypto/hash_service.dart';
@@ -87,7 +90,19 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   String? inviteUrl;
   String? notaryStatus;
   DateTime? expiresAt;
-  String message = '';
+  String _message = '';
+  AppTone messageTone = AppTone.success;
+  String get message => _message;
+  set message(String value) {
+    _message = value;
+    messageTone = AppTone.success;
+  }
+
+  void fail(String value) {
+    _message = value;
+    messageTone = AppTone.danger;
+  }
+
   PartyRole creatorRole = PartyRole.partyA;
   String formId = 'draft:${createIdentityNonce()}';
   bool _saveQueued = false;
@@ -123,12 +138,14 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
         final values = Map<String, String>.from(saved['fields'] as Map);
         for (final entry in controllers.entries) {
           if (values.containsKey(entry.key)) {
-            entry.value.text = values[entry.key]!;
+            entry.value.text = _moneyKeys.contains(entry.key)
+                ? VndInputFormatter.format(values[entry.key]!)
+                : values[entry.key]!;
           }
         }
       } catch (_) {
         stage = 0;
-        message = 'Bản nháp không hợp lệ; chưa khôi phục dữ liệu.';
+        fail('Bản nháp không hợp lệ; chưa khôi phục dữ liệu.');
       }
     }
   }
@@ -205,7 +222,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       } catch (_) {
         if (mounted) {
           setState(
-            () => message = 'Chưa lưu được bản nháp. Giữ tab và kiểm tra kho.',
+            () => fail('Chưa lưu được bản nháp. Giữ tab và kiểm tra kho.'),
           );
         }
       }
@@ -226,6 +243,10 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       consent: identityConsent,
     );
     if (!mounted) return;
+    final ageError = validator.signerAgeError(
+      evidence.attributes['dateOfBirth']?.toString(),
+    );
+    if (ageError != null) throw StateError(ageError);
     identityA = evidence;
     if (creatorRole == PartyRole.partyA &&
         controllers['accountName']!.text.isEmpty) {
@@ -235,26 +256,21 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     message = 'Đã điền thông tin ${creatorRole.label} từ CCCD mock.';
   });
 
-  Map<String, String> get fields => {
-    for (final entry in controllers.entries) entry.key: entry.value.text.trim(),
+  /// Money is displayed grouped ("50.000.000") but stored as plain digits so
+  /// drafts keep the v1 canonical encoding used by the signed digest.
+  Set<String> get _moneyKeys => {
+    for (final field in selectedTemplate?.fields ?? const <ContractFieldSpec>[])
+      if (field.kind == FieldKind.money) field.key,
   };
 
-  bool _isDateField(String key) =>
-      const {'completionDate', 'disbursementDate', 'dueDate'}.contains(key);
-
-  Future<void> _pickDate(String key) async {
-    final current = validator.parseDate(controllers[key]?.text ?? '');
-    final selected = await showDatePicker(
-      context: context,
-      initialDate: current ?? DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime(2200),
-      helpText: 'Chọn ngày',
-    );
-    if (selected == null) return;
-    String two(int value) => value.toString().padLeft(2, '0');
-    controllers[key]!.text =
-        '${two(selected.day)}/${two(selected.month)}/${selected.year}';
+  Map<String, String> get fields {
+    final money = _moneyKeys;
+    return {
+      for (final entry in controllers.entries)
+        entry.key: money.contains(entry.key)
+            ? VndInputFormatter.digitsOf(entry.value.text)
+            : entry.value.text.trim(),
+    };
   }
 
   bool validateDetails() {
@@ -264,12 +280,12 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
       fields,
     );
     if (businessError != null) {
-      setState(() => message = businessError);
+      setState(() => fail(businessError));
       return false;
     }
     final amount = templateService.amountFor(selectedTemplate!, fields);
     if (amount <= 0) {
-      setState(() => message = 'Số tiền thanh toán phải lớn hơn 0.');
+      setState(() => fail('Số tiền thanh toán phải lớn hơn 0.'));
       return false;
     }
     final draftId = createAgreementId();
@@ -516,7 +532,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     try {
       await operation();
     } catch (error) {
-      message = 'Không thể tiếp tục: $error';
+      fail('Không thể tiếp tục: ${friendlyError(error)}');
     }
     if (mounted) setState(() => busy = false);
   }
@@ -581,15 +597,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
             if (busy) const LinearProgressIndicator(),
             if (message.isNotEmpty) ...[
               const SizedBox(height: 12),
-              Text(
-                message,
-                style: TextStyle(
-                  color: message.startsWith('Không')
-                      ? Colors.red.shade700
-                      : const Color(0xff0f766e),
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              StatusMessage(message, tone: messageTone),
             ],
             const SizedBox(height: 16),
             if (selectedTemplate != null && widget.onSaveForm != null) ...[
@@ -742,32 +750,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
                     message: 'Bạn không cần nhập danh tính hoặc tài khoản của A. Sau lời mời, A đọc mock, bổ sung tài khoản và ký trước; bạn kiểm tra bản cuối rồi ký.',
                   ),
                 for (final field in selectedTemplate!.fields) ...[
-                  TextFormField(
-                    controller: controllers[field.key],
-                    readOnly: _isDateField(field.key),
-                    onTap: _isDateField(field.key)
-                        ? () => _pickDate(field.key)
-                        : null,
-                    maxLines: field.multiline ? 3 : 1,
-                    keyboardType: field.numeric
-                        ? TextInputType.number
-                        : TextInputType.text,
-                    inputFormatters: field.numeric
-                        ? [FilteringTextInputFormatter.digitsOnly]
-                        : null,
-                    decoration: InputDecoration(
-                      labelText: field.label,
-                      hintText: field.hint,
-                      suffixIcon: _isDateField(field.key)
-                          ? const Icon(Icons.calendar_month_outlined)
-                          : null,
-                    ),
-                    validator: (value) => validator.validateField(
-                      selectedTemplate!,
-                      field,
-                      value,
-                    ),
-                  ),
+                  _fieldInput(field),
                   const SizedBox(height: 12),
                 ],
               ],
@@ -781,20 +764,15 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
               child: Column(
                 children: [
                   TrustNotice(
+                    tone: AppTone.info,
                     title: 'Chiều chuyển tiền',
                     message: selectedTemplate!.kind == ContractKind.loan
                         ? 'Bên B là bên cho vay, giải ngân khoản vay vào tài khoản của Bên A.'
                         : 'Bên B là bên đặt cọc, chuyển tiền đặt cọc vào tài khoản của Bên A.',
                   ),
                   const SizedBox(height: 14),
-                  TextFormField(
-                    controller: controllers['bankBin'],
-                    decoration: const InputDecoration(
-                      labelText: 'Mã BIN ngân hàng',
-                      helperText: '970436 là Vietcombank',
-                    ),
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  BankPickerFormField(
+                    controller: controllers['bankBin']!,
                     validator: validator.validateBankBin,
                   ),
                   const SizedBox(height: 12),
@@ -802,7 +780,18 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
                     controller: controllers['accountNumber'],
                     decoration: const InputDecoration(
                       labelText: 'Số tài khoản nhận tiền',
+                      helperText:
+                          '4–19 ký tự chữ hoặc số, không có khoảng trắng.',
                     ),
+                    keyboardType: TextInputType.visiblePassword,
+                    textInputAction: TextInputAction.next,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    maxLength: 19,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp('[0-9A-Za-z]')),
+                    ],
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
                     validator: validator.validateAccountNumber,
                   ),
                   const SizedBox(height: 12),
@@ -810,8 +799,13 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
                     controller: controllers['accountName'],
                     decoration: const InputDecoration(
                       labelText: 'Tên chủ tài khoản',
+                      helperText: 'Ghi đúng như trong app ngân hàng, ví dụ NGUYEN VAN AN.',
                     ),
-                    validator: _required,
+                    textCapitalization: TextCapitalization.characters,
+                    textInputAction: TextInputAction.done,
+                    maxLength: 70,
+                    autovalidateMode: AutovalidateMode.onUserInteraction,
+                    validator: validator.validateAccountName,
                   ),
                 ],
               ),
@@ -840,8 +834,81 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     );
   }
 
-  String? _required(String? value) =>
-      value == null || value.trim().isEmpty ? 'Không được để trống' : null;
+  Widget _fieldInput(ContractFieldSpec field) {
+    final controller = controllers[field.key]!;
+    String? check(String? value) =>
+        validator.validateField(selectedTemplate!, field, value);
+    // Optional fields say so in their helper; required is the default.
+    final label = field.label;
+    switch (field.kind) {
+      case FieldKind.money:
+        return MoneyFormField(
+          controller: controller,
+          label: label,
+          helper: field.helper,
+          validator: (value) {
+            final own = check(value);
+            if (own != null) return own;
+            // Cross-field rule shown inline as soon as both amounts exist.
+            if (field.key == 'depositAmount' &&
+                validator.validateBusinessRules(selectedTemplate!, fields) !=
+                    null) {
+              return 'Không được lớn hơn tổng giá trị giao dịch';
+            }
+            return null;
+          },
+        );
+      case FieldKind.date:
+        final (first, last) = validator.dateBounds(field.key);
+        return DateFormField(
+          controller: controller,
+          label: label,
+          helper: field.helper,
+          firstDate: first,
+          lastDate: last,
+          validator: (value) {
+            final own = check(value);
+            if (own != null || field.key != 'dueDate') return own;
+            return validator.validateBusinessRules(selectedTemplate!, fields);
+          },
+        );
+      case FieldKind.percent:
+        return TextFormField(
+          controller: controller,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          textInputAction: TextInputAction.next,
+          inputFormatters: const [PercentInputFormatter()],
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          decoration: InputDecoration(
+            labelText: label,
+            helperText: field.helper,
+            suffixText: '%/năm',
+          ),
+          validator: check,
+        );
+      case FieldKind.text:
+        return TextFormField(
+          controller: controller,
+          minLines: field.multiline ? 2 : 1,
+          maxLines: field.multiline ? 5 : 1,
+          maxLength: field.maxLength,
+          keyboardType: field.multiline
+              ? TextInputType.multiline
+              : TextInputType.text,
+          textInputAction: field.multiline
+              ? TextInputAction.newline
+              : TextInputAction.next,
+          textCapitalization: TextCapitalization.sentences,
+          autovalidateMode: AutovalidateMode.onUserInteraction,
+          decoration: InputDecoration(
+            labelText: label,
+            hintText: field.hint,
+            helperText: field.helper,
+          ),
+          validator: check,
+        );
+    }
+  }
 
   Widget _reviewStep() => Column(
     children: [
@@ -1155,14 +1222,14 @@ class _TemplateCard extends StatelessWidget {
               width: 62,
               height: 62,
               decoration: BoxDecoration(
-                color: const Color(0xffccfbf1),
+                color: AppColors.accentContainer,
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(
                 template.kind == ContractKind.loan
                     ? Icons.payments_outlined
                     : Icons.handshake_outlined,
-                color: const Color(0xff0f766e),
+                color: AppColors.accent,
                 size: 32,
               ),
             ),
@@ -1180,11 +1247,6 @@ class _TemplateCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(template.subtitle),
-                  const SizedBox(height: 7),
-                  Text(
-                    'Mẫu tham chiếu: ${template.sourceFile}',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
-                  ),
                 ],
               ),
             ),

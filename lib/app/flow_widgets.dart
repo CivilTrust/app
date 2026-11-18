@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/app_theme.dart';
+
 class FlowHeader extends StatelessWidget {
   const FlowHeader({required this.title, required this.subtitle, super.key});
   final String title;
@@ -11,14 +13,12 @@ class FlowHeader extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          title,
-          style: const TextStyle(fontSize: 30, fontWeight: FontWeight.w800),
-        ),
+        Text(title, style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 6),
         Text(
           subtitle,
-          style: TextStyle(fontSize: 16, color: Colors.grey.shade700),
+          style: Theme.of(context).textTheme.bodyLarge
+              ?.copyWith(color: AppColors.inkMuted),
         ),
       ],
     ),
@@ -71,10 +71,10 @@ class FlowProgress extends StatelessWidget {
                     radius: 15,
                     backgroundColor: i <= current
                         ? Theme.of(context).colorScheme.primary
-                        : const Color(0xffdce5e2),
+                        : AppColors.border,
                     foregroundColor: i <= current
                         ? Colors.white
-                        : Colors.black54,
+                        : AppColors.inkMuted,
                     child: i < current
                         ? const Icon(Icons.check, size: 17)
                         : Text(
@@ -103,7 +103,7 @@ class FlowProgress extends StatelessWidget {
                 height: 2,
                 color: i < current
                     ? Theme.of(context).colorScheme.primary
-                    : const Color(0xffdce5e2),
+                    : AppColors.border,
               ),
           ],
         ],
@@ -168,16 +168,16 @@ class IdentitySummary extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xfffffbeb),
+        color: AppTone.mock.background,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xfffcd34d)),
+        border: Border.all(color: AppTone.mock.border),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const CircleAvatar(
-            backgroundColor: Color(0xfffef3c7),
-            child: Icon(Icons.person_outline, color: Color(0xff92400e)),
+          CircleAvatar(
+            backgroundColor: AppTone.mock.border,
+            child: Icon(Icons.person_outline, color: AppTone.mock.foreground),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -194,22 +194,22 @@ class IdentitySummary extends StatelessWidget {
                 Text('Ngày sinh: ${attributes['dateOfBirth'] ?? ''}'),
                 Text('Địa chỉ: ${attributes['permanentAddress'] ?? ''}'),
                 const SizedBox(height: 4),
-                const Row(
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Icon(
-                      Icons.warning_amber_rounded,
+                      AppTone.mock.icon,
                       size: 17,
-                      color: Color(0xff92400e),
+                      color: AppTone.mock.foreground,
                     ),
-                    SizedBox(width: 5),
+                    const SizedBox(width: 5),
                     Expanded(
                       child: Text(
                         'DỮ LIỆU MÔ PHỎNG — CHƯA XÁC THỰC CHIP CCCD',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w700,
-                          color: Color(0xff92400e),
+                          color: AppTone.mock.foreground,
                         ),
                       ),
                     ),
@@ -225,35 +225,104 @@ class IdentitySummary extends StatelessWidget {
 }
 
 class TrustNotice extends StatelessWidget {
-  const TrustNotice({required this.title, required this.message, super.key});
+  const TrustNotice({
+    required this.title,
+    required this.message,
+    this.tone = AppTone.warning,
+    super.key,
+  });
 
   final String title;
   final String message;
+  final AppTone tone;
 
   @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(14),
-    decoration: BoxDecoration(
-      color: const Color(0xfffffbeb),
-      borderRadius: BorderRadius.circular(12),
-      border: Border.all(color: const Color(0xfffcd34d)),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.info_outline, color: Color(0xff92400e)),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
-              const SizedBox(height: 3),
-              Text(message),
-            ],
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    label: title,
+    child: Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: tone.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: tone.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(tone.icon, color: tone.foreground),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: tone.foreground,
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(message, style: const TextStyle(color: AppColors.ink)),
+              ],
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
+    ),
+  );
+}
+
+/// Removes Dart exception prefixes so users never see "Bad state:" etc.
+String friendlyError(Object error) {
+  var text = error.toString();
+  for (final prefix in const [
+    'Bad state: ',
+    'FormatException: ',
+    'Exception: ',
+    'Invalid argument(s): ',
+  ]) {
+    if (text.startsWith(prefix)) text = text.substring(prefix.length);
+  }
+  return text.trim().isEmpty ? 'Đã xảy ra lỗi không xác định.' : text.trim();
+}
+
+/// Inline status line used by multi-step flows. Errors are announced to
+/// assistive technology as live regions.
+class StatusMessage extends StatelessWidget {
+  const StatusMessage(this.message, {this.tone = AppTone.success, super.key});
+  final String message;
+  final AppTone tone;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    child: Container(
+      width: double.infinity,
+      margin: const EdgeInsets.symmetric(vertical: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: tone.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tone.border),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(tone.icon, size: 20, color: tone.foreground),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: tone.foreground,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
     ),
   );
 }
