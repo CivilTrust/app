@@ -21,8 +21,10 @@ class WorkspaceHistoryPage extends StatefulWidget {
     required this.unlock,
     required this.open,
     required this.resumeForm,
+    this.hasUpdate,
     super.key,
   });
+  final bool Function(String localId)? hasUpdate;
   final WorkspaceService service;
   final Future<bool> Function() unlock;
   final Future<void> Function(String) open;
@@ -372,6 +374,27 @@ class _WorkspaceHistoryPageState extends State<WorkspaceHistoryPage> {
                   StatusChip(chip, tone: tone),
                 ],
               ),
+              if (widget.hasUpdate?.call(record['localId'] as String) ?? false)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.fiber_new_outlined,
+                        size: 18,
+                        color: AppTone.warning.foreground,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Có cập nhật mới từ bên kia — mở để xem',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          color: AppTone.warning.foreground,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               const SizedBox(height: 4),
               Text(
                 [

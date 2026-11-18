@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../app/flow_widgets.dart';
 import '../../ui/app_theme.dart';
+import '../../ui/notifier.dart';
 import '../../core/config/app_config.dart';
 import '../../core/crypto/hash_service.dart';
 import '../../core/encoding/encoding_utils.dart';
@@ -68,16 +69,7 @@ class _JoinAgreementPageState extends State<JoinAgreementPage>
     // error where the user is looking (they just tapped a lower button).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(value),
-            backgroundColor: AppTone.danger.foreground,
-            duration: const Duration(seconds: 6),
-            showCloseIcon: true,
-          ),
-        );
+      showAppToast(context, value, tone: AppTone.danger);
     });
   }
 

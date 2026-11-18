@@ -3,6 +3,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../ui/app_theme.dart';
+import '../ui/components.dart';
+import '../ui/notifier.dart';
+import '../app/flow_widgets.dart';
+import '../core/formatting/display_formatters.dart';
+import '../features/workspace/workspace_watcher.dart';
 import '../features/home/home_page.dart';
 import '../features/identity/identity_service.dart';
 import '../features/legal/legal_content.dart';
@@ -54,6 +59,8 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
     config.coordinatorBaseUrl,
   );
   late final workspace = WorkspaceService(vault, workspaceRepository);
+  late final watcher = WorkspaceWatcher(workspace);
+  int _announced = 0;
   late int index;
   final _bodyKey = GlobalKey(debugLabel: 'civiltrust-body');
 
@@ -61,6 +68,7 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
   void initState() {
     super.initState();
     vault.addListener(changed);
+    watcher.addListener(_watcherChanged);
     WidgetsBinding.instance.addObserver(this);
     index = Uri.base.fragment.startsWith('join=') ? _joinTab : _homeTab;
   }
@@ -69,17 +77,149 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
     if (mounted) setState(() {});
   }
 
+  /// Announces newly detected remote changes once, with a shortcut to open.
+  void _watcherChanged() {
+    if (!mounted) return;
+    final unread = watcher.unread;
+    if (unread > _announced && watcher.notifications.isNotEmpty) {
+      final latest = watcher.notifications.first;
+      showAppToast(
+        context,
+        latest.message,
+        tone: latest.needsAction ? AppTone.warning : AppTone.info,
+        actionLabel: 'Mở',
+        onAction: () => _openFromNotification(latest),
+      );
+    }
+    _announced = unread;
+    setState(() {});
+  }
+
+  Future<void> _openFromNotification(AppNotification item) async {
+    try {
+      await openRecord(item.localId);
+    } catch (e) {
+      if (mounted) {
+        showAppToast(context, friendlyError(e), tone: AppTone.danger);
+      }
+    }
+  }
+
+  Future<void> showNotifications() => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    isScrollControlled: true,
+    useSafeArea: true,
+    builder: (sheet) => ListenableBuilder(
+      listenable: watcher,
+      builder: (sheet, _) {
+        final items = watcher.notifications;
+        return ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.sizeOf(sheet).height * 0.75,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 12, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Thông báo',
+                        style: Theme.of(sheet).textTheme.titleLarge,
+                      ),
+                    ),
+                    if (watcher.unread > 0)
+                      TextButton(
+                        onPressed: watcher.markAllRead,
+                        child: const Text('Đánh dấu đã đọc'),
+                      ),
+                  ],
+                ),
+              ),
+              if (!vault.unlocked)
+                const EmptyState(
+                  icon: Icons.lock_outline,
+                  title: 'Mở kho để nhận thông báo',
+                  message: 'App chỉ kiểm tra thay đổi khi kho hợp đồng đang mở và app đang hiển thị.',
+                )
+              else if (items.isEmpty)
+                const EmptyState(
+                  icon: Icons.notifications_none,
+                  title: 'Chưa có thông báo mới',
+                  message: 'App tự kiểm tra khoảng mỗi 45 giây khi đang mở. Mở hồ sơ để xem trạng thái mới nhất.',
+                )
+              else
+                Flexible(
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    itemCount: items.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (_, i) {
+                      final item = items[i];
+                      return ListTile(
+                        leading: Icon(
+                          item.needsAction
+                              ? Icons.notification_important_outlined
+                              : Icons.info_outline,
+                          color: item.needsAction
+                              ? AppTone.warning.foreground
+                              : AppTone.info.foreground,
+                        ),
+                        title: Text(
+                          item.title,
+                          style: TextStyle(
+                            fontWeight: item.read
+                                ? FontWeight.w500
+                                : FontWeight.w700,
+                          ),
+                        ),
+                        subtitle: Text(
+                          '${item.message}\n${DisplayFormatters.dateTime(item.at)}',
+                        ),
+                        isThreeLine: true,
+                        trailing: item.read
+                            ? null
+                            : const Icon(
+                                Icons.circle,
+                                size: 10,
+                                color: AppColors.primary,
+                              ),
+                        onTap: () {
+                          Navigator.pop(sheet);
+                          _openFromNotification(item);
+                        },
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 12),
+            ],
+          ),
+        );
+      },
+    ),
+  );
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden) {
+      watcher.setActive(false);
       vault.lock();
+    } else if (state == AppLifecycleState.resumed) {
+      watcher.setActive(true);
     }
   }
 
   @override
   void dispose() {
     vault.removeListener(changed);
+    watcher.removeListener(_watcherChanged);
+    watcher.dispose();
     WidgetsBinding.instance.removeObserver(this);
     vault.dispose();
     workspaceRepository.close();
@@ -113,6 +253,8 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
         ),
       ),
     );
+    // The detail page syncs on open; the stored copy is now current.
+    watcher.markSeen(id);
   }
 
   Future<void> prepared(AgreementDraft draft, String formId) async {
@@ -216,6 +358,7 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
           : JoinAgreementPage(config: config, onWorkspaceInvite: joinWorkspace),
       WorkspaceHistoryPage(
         service: workspace,
+        hasUpdate: watcher.hasUpdate,
         unlock: unlock,
         open: openRecord,
         resumeForm: resumeForm,
@@ -235,115 +378,136 @@ class _CivilTrustHomeState extends State<CivilTrustHome>
       ),
     );
     void select(int value) => setState(() => index = value);
-    return Scaffold(
-      appBar: AppBar(
-        toolbarHeight: 64,
-        titleSpacing: 16,
-        title: const _BrandTitle(),
-        actions: [
-          if (vault.unlocked)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Tooltip(
-                message: 'Kho hợp đồng đang mở',
+    return Title(
+      title: watcher.unread == 0
+          ? 'CivilTrust'
+          : '(${watcher.unread}) CivilTrust',
+      color: AppColors.primary,
+      child: Scaffold(
+        appBar: AppBar(
+          toolbarHeight: 64,
+          titleSpacing: 16,
+          title: const _BrandTitle(),
+          actions: [
+            IconButton(
+              tooltip: watcher.unread == 0
+                  ? 'Thông báo'
+                  : 'Thông báo: ${watcher.unread} chưa đọc',
+              onPressed: showNotifications,
+              icon: Badge(
+                isLabelVisible: watcher.unread > 0,
+                label: Text('${watcher.unread}'),
                 child: Icon(
-                  Icons.lock_open_rounded,
-                  color: AppTone.success.foreground,
-                  semanticLabel: 'Kho hợp đồng đang mở',
+                  watcher.unread > 0
+                      ? Icons.notifications_active_outlined
+                      : Icons.notifications_none,
                 ),
               ),
             ),
-          PopupMenuButton<String>(
-            tooltip: 'Thêm',
-            icon: const Icon(Icons.more_vert),
-            onSelected: (value) => switch (value) {
-              'faq' => openLegalPage(context, const FaqPage()),
-              'terms' => openLegalPage(
-                context,
-                const LegalDocumentPage(document: termsOfUse),
-              ),
-              'privacy' => openLegalPage(
-                context,
-                const LegalDocumentPage(document: privacyPolicy),
-              ),
-              _ => openTools(),
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(
-                value: 'faq',
-                child: ListTile(
-                  leading: Icon(Icons.help_outline),
-                  title: Text('Câu hỏi thường gặp'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'terms',
-                child: ListTile(
-                  leading: Icon(Icons.description_outlined),
-                  title: Text('Điều khoản sử dụng'),
-                ),
-              ),
-              PopupMenuItem(
-                value: 'privacy',
-                child: ListTile(
-                  leading: Icon(Icons.privacy_tip_outlined),
-                  title: Text('Chính sách quyền riêng tư'),
-                ),
-              ),
-              PopupMenuDivider(),
-              PopupMenuItem(
-                value: 'tools',
-                child: ListTile(
-                  leading: Icon(Icons.build_outlined),
-                  title: Text('Công cụ & chẩn đoán'),
-                  subtitle: Text('Kết nối, thử VietQR, NFC'),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
-      body: useRail
-          ? Row(
-              children: [
-                NavigationRail(
-                  selectedIndex: index,
-                  onDestinationSelected: select,
-                  extended: extended,
-                  labelType: extended
-                      ? NavigationRailLabelType.none
-                      : NavigationRailLabelType.all,
-                  minExtendedWidth: 220,
-                  destinations: [
-                    for (final d in _destinations)
-                      NavigationRailDestination(
-                        icon: Icon(d.$1),
-                        selectedIcon: Icon(d.$2),
-                        label: Text(d.$3),
-                      ),
-                  ],
-                ),
-                const VerticalDivider(width: 1),
-                Expanded(child: body),
-              ],
-            )
-          : body,
-      bottomNavigationBar: useRail
-          ? null
-          : NavigationBar(
-              selectedIndex: index,
-              onDestinationSelected: select,
-              destinations: [
-                for (final d in _destinations)
-                  NavigationDestination(
-                    icon: Icon(d.$1),
-                    selectedIcon: Icon(d.$2),
-                    label: d.$3,
-                    tooltip: d.$4,
+            if (vault.unlocked)
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Tooltip(
+                  message: 'Kho hợp đồng đang mở',
+                  child: Icon(
+                    Icons.lock_open_rounded,
+                    color: AppTone.success.foreground,
+                    semanticLabel: 'Kho hợp đồng đang mở',
                   ),
+                ),
+              ),
+            PopupMenuButton<String>(
+              tooltip: 'Thêm',
+              icon: const Icon(Icons.more_vert),
+              onSelected: (value) => switch (value) {
+                'faq' => openLegalPage(context, const FaqPage()),
+                'terms' => openLegalPage(
+                  context,
+                  const LegalDocumentPage(document: termsOfUse),
+                ),
+                'privacy' => openLegalPage(
+                  context,
+                  const LegalDocumentPage(document: privacyPolicy),
+                ),
+                _ => openTools(),
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  value: 'faq',
+                  child: ListTile(
+                    leading: Icon(Icons.help_outline),
+                    title: Text('Câu hỏi thường gặp'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'terms',
+                  child: ListTile(
+                    leading: Icon(Icons.description_outlined),
+                    title: Text('Điều khoản sử dụng'),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'privacy',
+                  child: ListTile(
+                    leading: Icon(Icons.privacy_tip_outlined),
+                    title: Text('Chính sách quyền riêng tư'),
+                  ),
+                ),
+                PopupMenuDivider(),
+                PopupMenuItem(
+                  value: 'tools',
+                  child: ListTile(
+                    leading: Icon(Icons.build_outlined),
+                    title: Text('Công cụ & chẩn đoán'),
+                    subtitle: Text('Kết nối, thử VietQR, NFC'),
+                  ),
+                ),
               ],
             ),
+            const SizedBox(width: 4),
+          ],
+        ),
+        body: useRail
+            ? Row(
+                children: [
+                  NavigationRail(
+                    selectedIndex: index,
+                    onDestinationSelected: select,
+                    extended: extended,
+                    labelType: extended
+                        ? NavigationRailLabelType.none
+                        : NavigationRailLabelType.all,
+                    minExtendedWidth: 220,
+                    destinations: [
+                      for (final d in _destinations)
+                        NavigationRailDestination(
+                          icon: Icon(d.$1),
+                          selectedIcon: Icon(d.$2),
+                          label: Text(d.$3),
+                        ),
+                    ],
+                  ),
+                  const VerticalDivider(width: 1),
+                  Expanded(child: body),
+                ],
+              )
+            : body,
+        bottomNavigationBar: useRail
+            ? null
+            : NavigationBar(
+                selectedIndex: index,
+                onDestinationSelected: select,
+                destinations: [
+                  for (final d in _destinations)
+                    NavigationDestination(
+                      icon: Icon(d.$1),
+                      selectedIcon: Icon(d.$2),
+                      label: d.$3,
+                      tooltip: d.$4,
+                    ),
+                ],
+              ),
+      ),
     );
   }
 }

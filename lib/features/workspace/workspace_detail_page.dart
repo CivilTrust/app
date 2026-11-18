@@ -24,6 +24,7 @@ import 'workflow_rules.dart';
 import 'workspace_overview.dart';
 import 'contract_reader_page.dart';
 import '../../ui/app_theme.dart';
+import '../../ui/notifier.dart';
 import '../../ui/components.dart';
 
 import 'package:qr_flutter/qr_flutter.dart';
@@ -148,16 +149,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
           _message = 'Không thể tiếp tục: ${friendlyError(e)}';
           messageTone = AppTone.danger;
         });
-        ScaffoldMessenger.maybeOf(context)
-          ?..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(friendlyError(e)),
-              backgroundColor: AppTone.danger.foreground,
-              showCloseIcon: true,
-              duration: const Duration(seconds: 6),
-            ),
-          );
+        showAppToast(context, friendlyError(e), tone: AppTone.danger);
       }
     }
     if (mounted) setState(() => busy = false);
@@ -623,6 +615,9 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                               ? buildInviteUrl(Uri.base, code)
                               : 'join=$code';
                           await Clipboard.setData(ClipboardData(text: url));
+                          if (context.mounted) {
+                            showAppToast(context, 'Đã sao chép link mời.');
+                          }
                           message =
                               'Đã sao chép link mời riêng cho ${WorkflowRules.creator(current.draft).other.label}. Chỉ gửi qua kênh tin cậy.';
                         }),

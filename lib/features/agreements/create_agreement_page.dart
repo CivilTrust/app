@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../app/flow_widgets.dart';
 import '../../ui/app_theme.dart';
+import '../../ui/notifier.dart';
 import '../../ui/form_fields.dart';
 import '../../core/formatting/vnd_words.dart';
 import '../../core/config/app_config.dart';
@@ -106,16 +107,7 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
     // error where the user is looking (they just tapped a lower button).
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      ScaffoldMessenger.maybeOf(context)
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(value),
-            backgroundColor: AppTone.danger.foreground,
-            duration: const Duration(seconds: 6),
-            showCloseIcon: true,
-          ),
-        );
+      showAppToast(context, value, tone: AppTone.danger);
     });
   }
 
@@ -434,11 +426,9 @@ class _CreateAgreementPageState extends State<CreateAgreementPage>
   Future<void> copyInvite() async {
     await Clipboard.setData(ClipboardData(text: inviteUrl!));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Đã sao chép link mời riêng tư.'),
-        behavior: SnackBarBehavior.floating,
-      ),
+    showAppToast(
+      context,
+      'Đã sao chép link mời riêng tư. Chỉ gửi cho đúng bên kia.',
     );
   }
 
