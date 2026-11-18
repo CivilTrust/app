@@ -12,6 +12,7 @@ import '../../app/flow_widgets.dart';
 import '../../core/config/app_config.dart';
 import '../../core/config/environment_check.dart';
 import '../../core/models/agreement.dart';
+import '../../core/formatting/display_formatters.dart';
 import '../../core/models/identity_evidence.dart';
 import '../../core/models/party_role.dart';
 import '../identity/identity_context.dart';
@@ -20,6 +21,13 @@ import '../payment/payment_details.dart';
 import '../payment/payment_qr_card.dart';
 import '../sessions/invite_url.dart';
 import 'workflow_rules.dart';
+import 'workspace_overview.dart';
+import 'contract_reader_page.dart';
+import '../../ui/app_theme.dart';
+import '../../ui/components.dart';
+
+import 'package:qr_flutter/qr_flutter.dart';
+
 import 'workspace_artifacts.dart';
 import 'workspace_service.dart';
 import 'payer_proposal.dart';
@@ -57,7 +65,20 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
   IdentityEvidence? recipientPreview;
   bool transferDeclared = false, attachmentReviewed = false;
   bool busy = false, reviewed = false, consent = false, received = false;
-  String message = '';
+  bool readToEnd = false;
+  String _message = '';
+  AppTone messageTone = AppTone.success;
+  String get message => _message;
+  set message(String value) {
+    _message = value;
+    messageTone = AppTone.success;
+  }
+
+  void warn(String value) {
+    _message = value;
+    messageTone = AppTone.warning;
+  }
+
   Map<String, dynamic> get record => widget.service.record(widget.localId);
   SigningSession get session => widget.service.session(record);
   @override
@@ -91,6 +112,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
       transferDeclared = false;
       attachmentReviewed = false;
       reviewed = false;
+      readToEnd = false;
       consent = false;
       received = false;
     }
@@ -121,7 +143,22 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
     try {
       await action();
     } catch (e) {
-      if (mounted) setState(() => message = e.toString());
+      if (mounted) {
+        setState(() {
+          _message = 'Không thể tiếp tục: ${friendlyError(e)}';
+          messageTone = AppTone.danger;
+        });
+        ScaffoldMessenger.maybeOf(context)
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(friendlyError(e)),
+              backgroundColor: AppTone.danger.foreground,
+              showCloseIcon: true,
+              duration: const Duration(seconds: 6),
+            ),
+          );
+      }
     }
     if (mounted) setState(() => busy = false);
   }
@@ -132,9 +169,10 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
     loadBank();
     recipientPreview = null;
     reviewed = false;
+    readToEnd = false;
     consent = false;
     received = false;
-    message = 'Đã đồng bộ và kiểm chuỗi chữ ký. Danh tính vẫn là mock; trạng thái tiền là tự khai.';
+    message = 'Đã cập nhật trạng thái mới nhất và kiểm tra chuỗi chữ ký.';
     if (WorkflowRules.isPayerProposal(session.draft) &&
         session.partyA != null &&
         session.partyB != null &&
@@ -142,7 +180,9 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
       try {
         await artifacts.savePayerStage(widget.localId);
       } catch (_) {
-        message = 'Đã đồng bộ. Chưa lưu/tải được gói PDF nguyên bản; dùng nút lưu hồ sơ để thử lại, không ký lại.';
+        warn(
+          'Đã đồng bộ nhưng chưa lưu/tải được gói PDF nguyên bản. Dùng nút lưu hồ sơ để thử lại, không ký lại.',
+        );
       }
     }
     if (record['finalized'] == true && record['archive'] == null) {
@@ -203,7 +243,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
     consent = false;
     received = false;
     loadBank();
-    message = 'Đã lưu và đồng bộ thao tác ${action.name}.';
+    message = 'Đã lưu và gửi thao tác cho bên kia.';
     if (WorkflowRules.isPayerProposal(session.draft) &&
         session.partyA != null &&
         session.partyB != null) {
@@ -219,10 +259,124 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
         attachmentReviewed = false;
         reference.clear();
       } catch (_) {
-        message = 'Thao tác đã đồng bộ; gói hồ sơ chưa hoàn tất lưu/công bố. Làm mới hoặc dùng nút lưu hồ sơ để tiếp tục, không ký/báo chuyển lại.';
+        warn(
+          'Thao tác đã đồng bộ nhưng gói hồ sơ chưa lưu/công bố xong. Làm mới hoặc dùng nút lưu hồ sơ để tiếp tục, không ký/báo chuyển lại.',
+        );
       }
     }
   });
+  Future<void> confirmAndAct(WorkflowAction action) async {
+    final payer = WorkflowRules.isPayerProposal(session.draft);
+    final (title, points, label, destructive) = switch (action) {
+      WorkflowAction.approve => (
+        payer ? 'Khóa bản cuối của hợp đồng?' : 'Khóa nội dung hợp đồng?',
+        [
+          payer
+              ? 'Danh tính và tài khoản nhận tiền của Bên A được ghi vào bản cuối.'
+              : 'Điều khoản và tài khoản nhận tiền được khóa lại.',
+          'Sau khi khóa không sửa được nội dung; muốn thay đổi phải tạo đề xuất mới.',
+        ],
+        'Khóa nội dung',
+        false,
+      ),
+      WorkflowAction.sign => (
+        'Ký hợp đồng?',
+        [
+          'Bạn ký cho đúng nội dung đang hiển thị, bằng danh tính vừa đọc.',
+          'Chữ ký được gửi cho bên kia và lưu làm bằng chứng.',
+        ],
+        'Ký hợp đồng',
+        false,
+      ),
+      WorkflowAction.reportTransfer => (
+        'Báo đã chuyển khoản?',
+        [
+          'Bạn xác nhận đã thực sự chuyển tiền, không chỉ mở mã QR.',
+          'Thông báo và chứng từ (nếu có) được gửi cho Bên A.',
+        ],
+        'Báo đã chuyển',
+        false,
+      ),
+      WorkflowAction.confirmReceived => (
+        'Xác nhận đã nhận tiền?',
+        [
+          'Bạn đã tự thấy tiền về tài khoản trong app ngân hàng.',
+          'Xác nhận này được ghi vào gói hồ sơ hoàn tất gửi cho Bên B.',
+        ],
+        'Xác nhận đã nhận',
+        false,
+      ),
+      WorkflowAction.requestChanges => (
+        'Đề nghị Bên B chỉnh sửa?',
+        [
+          'Đề xuất hiện tại sẽ đóng lại.',
+          'Bên B cần tạo đề xuất mới từ nội dung cũ.',
+        ],
+        'Gửi đề nghị sửa',
+        true,
+      ),
+      WorkflowAction.decline => (
+        'Từ chối đề xuất?',
+        ['Đề xuất sẽ đóng lại và không thể ký tiếp.'],
+        'Từ chối',
+        true,
+      ),
+      WorkflowAction.reportIssue => (
+        'Báo chưa thấy tiền?',
+        [
+          'Bên B nhận phản hồi rằng bạn chưa thấy tiền hoặc có sai lệch.',
+          'Hợp đồng vẫn ở trạng thái chờ xác nhận. Chỉ gửi được một lần.',
+        ],
+        'Gửi phản hồi',
+        true,
+      ),
+    };
+    if (await confirmIrreversible(
+      context,
+      title: title,
+      points: points,
+      confirmLabel: label,
+      destructive: destructive,
+    )) {
+      await act(action);
+    }
+  }
+
+  Future<void> showInviteQr(String url) => showDialog<void>(
+    context: context,
+    builder: (dialog) => AlertDialog(
+      title: const Text('Mã QR lời mời'),
+      content: SizedBox(
+        width: 280,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              color: Colors.white,
+              padding: const EdgeInsets.all(12),
+              child: QrImageView(
+                data: url,
+                size: 240,
+                semanticsLabel: 'Mã QR chứa link mời ký',
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Chỉ cho đúng bên kia quét trực tiếp. Mã này là quyền truy cập hợp đồng; không chụp màn hình gửi lên nhóm chat công khai.',
+              style: TextStyle(color: AppTone.warning.foreground),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        FilledButton(
+          onPressed: () => Navigator.pop(dialog),
+          child: const Text('Đóng'),
+        ),
+      ],
+    ),
+  );
+
   Future<void> pickAttachment() => run(() async {
     final file = await FilePicker.pickFile(
       type: FileType.custom,
@@ -354,11 +508,84 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
             subtitle:
                 '${role.label} · ${role.businessLabel(current.draft.templateId)} · ${local['isOwner'] == true ? 'Người tạo' : 'Người được mời'}',
           ),
-          TrustNotice(
-            title: WorkflowRules.status(current),
-            message:
-                'Bản lưu gần nhất: ${local['lastSyncedAt'] ?? 'chưa đồng bộ'}. Hết hạn truy cập server: ${local['expiresAt'] ?? 'chưa có'}. Không dùng trạng thái cũ làm kết luận mới nhất.',
+          Builder(
+            builder: (context) {
+              final overview = overviewOf(local, current);
+              final tone = switch (overview.bucket) {
+                RecordBucket.action => AppTone.warning,
+                RecordBucket.done => AppTone.success,
+                _ => AppTone.info,
+              };
+              final synced = DateTime.tryParse(
+                local['lastSyncedAt']?.toString() ?? '',
+              );
+              return Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: tone.background,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: tone.border),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        StatusChip(
+                          agreementCode(current.draft.id),
+                          tone: AppTone.info,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            DisplayFormatters.vnd(current.draft.amountVnd),
+                            textAlign: TextAlign.end,
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Text(
+                      overview.bucket == RecordBucket.action
+                          ? 'Việc bạn cần làm'
+                          : 'Trạng thái',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: tone.foreground,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      overview.headline,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    if (overview.detail != null) Text(overview.detail!),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Cập nhật lúc: ${synced == null ? 'chưa đồng bộ' : DisplayFormatters.dateTime(synced)}. Bấm Làm mới để xem trạng thái mới nhất.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.inkMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
+          const SizedBox(height: 12),
+          SectionCard(
+            title: 'Tiến trình',
+            icon: Icons.timeline,
+            child: ProgressTimeline(
+              entries: timelineOf(
+                current,
+                finalized: local['finalized'] == true,
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           if (!payerProposal &&
               WorkflowRules.creator(current.draft) == PartyRole.partyB)
             const TrustNotice(
@@ -366,11 +593,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
               message: 'Phiên này giữ nguyên quy tắc B ký trước, A ký sau. Chỉ đề xuất B tạo mới áp dụng A ký trước; không tự đổi thứ tự của hồ sơ đang có.',
             ),
           if (busy) const LinearProgressIndicator(),
-          if (message.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text(message),
-            ),
+          if (message.isNotEmpty) StatusMessage(message, tone: messageTone),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -401,9 +624,23 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                               : 'join=$code';
                           await Clipboard.setData(ClipboardData(text: url));
                           message =
-                              'Đã sao chép lời mời riêng cho ${WorkflowRules.creator(current.draft).other.label}. Không gửi gói khôi phục.';
+                              'Đã sao chép link mời riêng cho ${WorkflowRules.creator(current.draft).other.label}. Chỉ gửi qua kênh tin cậy.';
                         }),
                   child: const Text('Sao chép lời mời đối tác'),
+                ),
+              if (local['isOwner'] == true &&
+                  {'http', 'https'}.contains(Uri.base.scheme))
+                OutlinedButton.icon(
+                  onPressed: busy
+                      ? null
+                      : () => showInviteQr(
+                          buildInviteUrl(
+                            Uri.base,
+                            widget.service.invite(record),
+                          ),
+                        ),
+                  icon: const Icon(Icons.qr_code_2),
+                  label: const Text('Hiện QR lời mời'),
                 ),
             ],
           ),
@@ -480,7 +717,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                             reviewed &&
                             (!payerProposal ||
                                 (consent && recipientPreview != null))
-                        ? () => act(WorkflowAction.approve)
+                        ? () => confirmAndAct(WorkflowAction.approve)
                         : null,
                     child: Text(
                       payerProposal
@@ -502,12 +739,40 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
               const Text(
                 'A đã ký. Hãy kiểm tra danh tính A, ngân hàng, số tài khoản và tên nhận bên trên. Điều khoản B đề xuất được giữ nguyên; bạn ký trước khi mở VietQR.',
               ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: busy
+                  ? null
+                  : () async {
+                      final read = await ContractReaderPage.open(
+                        context,
+                        title: current.draft.title,
+                        text: current.draft.terms,
+                        code: agreementCode(current.draft.id),
+                      );
+                      if (read && mounted) setState(() => readToEnd = true);
+                    },
+              icon: Icon(
+                readToEnd ? Icons.check_circle : Icons.menu_book_outlined,
+                color: readToEnd ? AppTone.success.foreground : null,
+              ),
+              label: Text(
+                readToEnd
+                    ? 'Đã đọc hết toàn văn'
+                    : 'Bước 1: Đọc toàn văn hợp đồng',
+              ),
+            ),
             CheckboxListTile(
               value: reviewed,
-              onChanged: (v) => setState(() => reviewed = v ?? false),
+              onChanged: readToEnd
+                  ? (v) => setState(() => reviewed = v ?? false)
+                  : null,
               title: const Text(
                 'Tôi đã đọc nội dung, thông tin nhận tiền và đồng ý ký bản đã khóa.',
               ),
+              subtitle: readToEnd
+                  ? null
+                  : const Text('Đọc hết toàn văn trước để mở ô này.'),
             ),
             IdentityDataNotice(mock: identity.isMock),
             CheckboxListTile(
@@ -518,8 +783,8 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
               ),
             ),
             FilledButton(
-              onPressed: reviewed && consent
-                  ? () => act(WorkflowAction.sign)
+              onPressed: readToEnd && reviewed && consent
+                  ? () => confirmAndAct(WorkflowAction.sign)
                   : null,
               child: Text('${role.label} đọc danh tính mới và ký'),
             ),
@@ -530,7 +795,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
           ],
           if (allows(WorkflowAction.reportTransfer) && !payerProposal)
             FilledButton(
-              onPressed: () => act(WorkflowAction.reportTransfer),
+              onPressed: () => confirmAndAct(WorkflowAction.reportTransfer),
               child: const Text('B báo đã chuyển tiền (tự khai)'),
             ),
           if (payerProposal && allows(WorkflowAction.reportTransfer)) ...[
@@ -589,7 +854,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
                   transferDeclared &&
                       (attachment == null || attachmentReviewed) &&
                       record['signedArtifactReady'] == true
-                  ? () => act(WorkflowAction.reportTransfer)
+                  ? () => confirmAndAct(WorkflowAction.reportTransfer)
                   : null,
               child: const Text(
                 'B gửi thông báo chuyển khoản và lưu bằng chứng',
@@ -660,7 +925,7 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
             ),
             FilledButton(
               onPressed: received
-                  ? () => act(WorkflowAction.confirmReceived)
+                  ? () => confirmAndAct(WorkflowAction.confirmReceived)
                   : null,
               child: const Text('A xác nhận đã nhận tiền'),
             ),
@@ -678,17 +943,17 @@ class _WorkspaceDetailPageState extends State<WorkspaceDetailPage>
             ),
             if (allows(WorkflowAction.requestChanges))
               OutlinedButton(
-                onPressed: () => act(WorkflowAction.requestChanges),
+                onPressed: () => confirmAndAct(WorkflowAction.requestChanges),
                 child: const Text('Đề nghị B tạo bản chỉnh sửa'),
               ),
             if (allows(WorkflowAction.decline))
               OutlinedButton(
-                onPressed: () => act(WorkflowAction.decline),
+                onPressed: () => confirmAndAct(WorkflowAction.decline),
                 child: const Text('Từ chối đề xuất này'),
               ),
             if (allows(WorkflowAction.reportIssue) && current.response == null)
               OutlinedButton(
-                onPressed: () => act(WorkflowAction.reportIssue),
+                onPressed: () => confirmAndAct(WorkflowAction.reportIssue),
                 child: const Text(
                   'Chưa thấy tiền / có sai lệch — chưa xác nhận nhận đủ',
                 ),
